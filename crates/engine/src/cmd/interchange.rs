@@ -152,19 +152,9 @@ pub(crate) fn import_idml_confined(bytes: &[u8], package: Option<&std::path::Pat
             None
         }
     };
-    let mut d = designcraft_idml::import_idml_report_with_fonts(bytes, &read, &std::collections::HashMap::new(), &glyph_char)?.document;
+    let mut d = designcraft_idml::import_idml_with(bytes, &read)?;
     resolve_pdf_crops(&mut d);
     Ok(d)
-}
-
-/// The character that draws glyph `gid` of an available font `family` `style`, for a bullet IDML
-/// stores as a glyph (#2620). None when the font isn't available: another font's glyph ids differ.
-pub(crate) fn glyph_char(family: &str, style: &str, gid: u32) -> Option<char> {
-    let db = designcraft_fonts::FontDb::global();
-    if !db.has_family(family) {
-        return None;
-    }
-    db.face(family, if style.is_empty() { "Regular" } else { style }).char_for_glyph(gid)
 }
 
 /// Import IDML bytes; `package` is the package's file (its folder is where links are looked for).
@@ -199,7 +189,7 @@ fn import_report_with_previews(
         }
     };
     let designcraft_idml::Imported { mut document, warnings, story_ids } =
-        designcraft_idml::import_idml_report_with_fonts(bytes, &read, previews, &glyph_char).map_err(|e| EngineError::Other(e.to_string()))?;
+        designcraft_idml::import_idml_report_with_previews(bytes, &read, previews).map_err(|e| EngineError::Other(e.to_string()))?;
     resolve_pdf_crops(&mut document);
     #[cfg(not(target_arch = "wasm32"))]
     let document = {
