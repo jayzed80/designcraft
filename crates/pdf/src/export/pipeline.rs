@@ -153,14 +153,7 @@ pub fn print_color(doc: &Document, opts: &PdfOptions) -> bool {
 
 /// Like [`export_pdf`], also returning warnings about approximated or dropped features.
 pub fn export_pdf_with_report(doc: &Document, cache: &Cache, opts: &PdfOptions) -> Result<ExportReport> {
-    write::guard(|| export_pdf_with_report_inner(doc, cache, opts, &designcraft_color::cms::active()))
-}
-
-/// [`export_pdf_with_report`] with the colour settings of `cms` for the print output, rather than
-/// the process-wide ones other tests share.
-#[cfg(test)]
-pub(crate) fn export_pdf_with_cms(doc: &Document, cache: &Cache, opts: &PdfOptions, cms: &designcraft_color::cms::Cms) -> Result<ExportReport> {
-    write::guard(|| export_pdf_with_report_inner(doc, cache, opts, cms))
+    write::guard(|| export_pdf_with_report_inner(doc, cache, opts))
 }
 
 /// Form fields (Buttons and Forms) and, for interactive PDF, video and sound; not in PDF/X
@@ -183,7 +176,7 @@ fn add_form_fields(bytes: &mut Vec<u8>, warnings: &mut Vec<String>, doc: &Docume
     }
 }
 
-fn export_pdf_with_report_inner(doc: &Document, cache: &Cache, opts: &PdfOptions, cms: &designcraft_color::cms::Cms) -> Result<ExportReport> {
+fn export_pdf_with_report_inner(doc: &Document, cache: &Cache, opts: &PdfOptions) -> Result<ExportReport> {
     let sheets = sheets(doc, opts)?;
     let (version, archival) = match opts.standard {
         Standard::None => (PdfVersion::Pdf17, None),
@@ -193,14 +186,9 @@ fn export_pdf_with_report_inner(doc: &Document, cache: &Cache, opts: &PdfOptions
     };
     let configuration = write::configuration(version, archival)?;
     let mut warnings = Vec::new();
-    let mut x1a_process = None;
     let base = if print_color(doc, opts) {
         // An output intent only for PDF/X, as in InDesign.
-        let (settings, warning) = crate::pdfx::print_settings_with(cms, opts.standard.is_pdfx())?;
-        if opts.standard == Standard::PdfX1a {
-            let profile = crate::pdfx::output_profile(cms, warning.is_some());
-            x1a_process = crate::pdfx1a::ProcessConversion::new(&profile, cms.settings().bpc);
-        }
+        let (settings, warning) = crate::pdfx::print_settings(opts.standard.is_pdfx())?;
         warnings.extend(warning);
         let pdfx_version = (opts.standard == Standard::PdfX4).then(|| "PDF/X-4".to_string());
         krilla::SerializeSettings { pdfx_version, ..settings }
@@ -239,7 +227,6 @@ fn export_pdf_with_report_inner(doc: &Document, cache: &Cache, opts: &PdfOptions
         fonts: HashMap::new(),
         reverse_cmaps: HashMap::new(),
         rgb_only: archival.is_some(),
-        x1a_process,
         tags: Vec::new(),
         story_tags: HashMap::new(),
         tag_story: None,
