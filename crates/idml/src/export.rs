@@ -36,17 +36,39 @@ const TOC_STYLE_ID: &str = "TOCStyle/Table of Contents";
 const TOC_STYLE_NAME: &str = "Table of Contents";
 const NO_CHAR_ID: &str = "CharacterStyle/$ID/[No character style]";
 
+/// The face the exporting app found for a font family and style, read from its font file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedFont {
+    /// The face's PostScript name (`name` ID 6).
+    pub postscript_name: String,
+    /// The face's version string (`name` ID 5).
+    pub version: Option<String>,
+}
+
+/// Finds the face for a family and style, or `None` when it is missing.
+pub type FontResolver = std::sync::Arc<dyn Fn(&str, &str) -> Option<ResolvedFont> + Send + Sync>;
+
 /// Export options.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ExportOptions {
     /// Embed image data in the package (`<Contents>`). When false, images with a known link path
     /// are written as links only.
     pub embed_images: bool,
+    /// The faces of the document's fonts. A face it finds is written to `Fonts.xml` as installed,
+    /// with its PostScript name and version; any other font, or every font without a resolver,
+    /// is written as not available under a `$ID/` name.
+    pub fonts: Option<FontResolver>,
+}
+
+impl std::fmt::Debug for ExportOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExportOptions").field("embed_images", &self.embed_images).field("fonts", &self.fonts.is_some()).finish()
+    }
 }
 
 impl Default for ExportOptions {
     fn default() -> Self {
-        ExportOptions { embed_images: true }
+        ExportOptions { embed_images: true, fonts: None }
     }
 }
 

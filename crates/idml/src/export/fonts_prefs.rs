@@ -36,6 +36,8 @@ impl<'a> Ex<'a> {
             });
         }
         let fonts = std::mem::take(&mut self.fonts);
+        // Font `Self` id → the face found for it, written as installed below.
+        let mut installed = std::collections::HashMap::new();
         for (fam, styles) in &fonts {
             let fid = format!("di{:x}", {
                 self.next += 1;
@@ -44,18 +46,28 @@ impl<'a> Ex<'a> {
             let mut faces = Vec::new();
             for s in styles {
                 let name = format!("{fam} {s}");
-                faces.push(FontDefinition {
-                    self_id: format!("{fid}Fontn{fam} {s}"),
-                    family: fam.clone(),
-                    name,
-                    postscript_name: format!("$ID/{}-{}", fam.replace(' ', ""), s.replace(' ', "")),
-                    style: s.clone(),
-                });
+                let self_id = format!("{fid}Fontn{fam} {s}");
+                let resolved = self.opts.fonts.as_ref().and_then(|resolve| resolve(fam, s)).filter(|r| !r.postscript_name.is_empty());
+                let postscript_name = match &resolved {
+                    Some(r) => r.postscript_name.clone(),
+                    None => format!("$ID/{}-{}", fam.replace(' ', ""), s.replace(' ', "")),
+                };
+                if let Some(r) = resolved {
+                    installed.insert(self_id.clone(), r);
+                }
+                faces.push(FontDefinition { self_id, family: fam.clone(), name, postscript_name, style: s.clone() });
             }
             fonts_part.families.push(FontFamilyDefinition { self_id: fid, name: fam.clone(), fonts: faces });
         }
         self.fonts = fonts;
-        craft_idml::part_xml(&fonts_part.to_el())
+        let mut root = fonts_part.to_el();
+        for font in root.elements_mut().filter(|e| e.local() == "FontFamily").flat_map(|e| e.elements_mut()) {
+            let Some(r) = font.attr("Self").and_then(|id| installed.get(id)) else { continue };
+            let version = r.version.clone().unwrap_or_else(|| "$ID/".to_string());
+            font.set_attr("Status", "Installed");
+            font.set_attr("Version", version);
+        }
+        craft_idml::part_xml(&root)
     }
 
     // ---------- Preferences.xml ----------

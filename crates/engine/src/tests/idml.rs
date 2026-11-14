@@ -707,3 +707,42 @@ fn alternate_layouts_round_trip_through_idml() {
     let back = designcraft_idml::import_idml(&designcraft_idml::export_idml(&s.doc().unwrap().doc)).unwrap();
     assert!(back.sections.iter().all(|x| x.layout.is_none()));
 }
+
+/// #2759: Export IDML names the face DesignCraft set the text in by its real PostScript name and
+/// version, as installed, so InDesign finds it instead of substituting it. A font that really is
+/// missing keeps the `$ID/` name and stays not available.
+#[test]
+fn idml_export_names_installed_fonts_by_their_postscript_names() {
+    let mut s = Session::new();
+    s.execute("file.new", &json!({})).unwrap();
+    let r = s.execute("frame.create", &json!({"rect": [72, 72, 400, 300], "content": "text", "text": "Some text here."})).unwrap();
+    let sid = s.doc().unwrap().doc.item(ItemId(r["id"].as_u64().unwrap())).unwrap().text_frame().unwrap().story;
+    s.execute("text.select", &json!({"story": sid.0, "anchor": 0, "focus": 4})).unwrap();
+    s.execute("type.char", &json!({"fontFamily": "Source Serif 4", "fontStyle": "Bold"})).unwrap();
+    s.execute("text.select", &json!({"story": sid.0, "anchor": 5, "focus": 9})).unwrap();
+    s.execute("type.char", &json!({"fontFamily": "Nonexistent Sans", "fontStyle": "Bold"})).unwrap();
+
+    let out = s.execute("file.exportIdml", &json!({})).unwrap();
+    let bytes = crate::cmd::base64_decode(out["base64"].as_str().unwrap());
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut fonts = String::new();
+    std::io::Read::read_to_string(&mut zip.by_name("Resources/Fonts.xml").unwrap(), &mut fonts).unwrap();
+    let font = |family: &str, style: &str| {
+        let key = format!(r#"FontFamily="{family}" Name="{family} {style}""#);
+        let found = fonts.split("<Font ").find(|f| f.contains(&key)).and_then(|f| f.split("/>").next());
+        found.unwrap_or_else(|| panic!("{key} in {fonts}")).to_string()
+    };
+
+    let face = designcraft_fonts::FontDb::global().scoped(0).face("Source Serif 4", "Bold");
+    assert_eq!(face.postscript_name(), Some("SourceSerif4-Bold"));
+    let version = face.version().expect("the bundled font has a version");
+    let bold = font("Source Serif 4", "Bold");
+    assert!(bold.contains(r#"PostScriptName="SourceSerif4-Bold""#), "{bold}");
+    assert!(bold.contains(r#"Status="Installed""#), "{bold}");
+    assert!(bold.contains(&format!(r#"Version="{version}""#)), "{bold}");
+
+    let missing = font("Nonexistent Sans", "Bold");
+    assert!(missing.contains(r#"PostScriptName="$ID/NonexistentSans-Bold""#), "{missing}");
+    assert!(missing.contains(r#"Status="NotAvailable""#), "{missing}");
+    assert!(missing.contains(r#"Version="$ID/""#), "{missing}");
+}

@@ -174,7 +174,7 @@ fn eps_idml_roundtrip_preserves_source_and_resource_type() {
         let mut linked = (*source).clone();
         let a = Arc::make_mut(linked.assets.values_mut().next().unwrap());
         a.link = Some("/synthetic/logo.eps".into());
-        let idml = designcraft_idml::export_idml_with(&linked, &designcraft_idml::ExportOptions { embed_images: false });
+        let idml = designcraft_idml::export_idml_with(&linked, &designcraft_idml::ExportOptions { embed_images: false, fonts: None });
         let missing = designcraft_idml::import_idml_with(&idml, &|_| None).unwrap();
         let a = missing.assets.values().next().unwrap();
         assert_eq!(a.mime, "application/postscript");

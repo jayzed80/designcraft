@@ -25,9 +25,27 @@ pub fn specs() -> Vec<CommandSpec> {
     ]
 }
 
+/// The IDML export's font faces: the face of a family and style this document's fonts have, with
+/// its PostScript name and version, so InDesign finds it by that name rather than substituting.
+/// A missing family or style resolves to nothing and stays not available in the package.
+pub(crate) fn idml_fonts(font_scope: u32) -> designcraft_idml::FontResolver {
+    std::sync::Arc::new(move |family: &str, style: &str| {
+        let db = designcraft_fonts::FontDb::global().scoped(font_scope);
+        if !db.has_family(family) || !db.has_style(family, style) {
+            return None;
+        }
+        let face = db.face(family, style);
+        let postscript_name = face.postscript_name()?.to_string();
+        Some(designcraft_idml::ResolvedFont { postscript_name, version: face.version() })
+    })
+}
+
 fn export_idml(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.doc()?;
-    let opts = designcraft_idml::ExportOptions { embed_images: p.get("embedImages").and_then(Value::as_bool).unwrap_or(true) };
+    let opts = designcraft_idml::ExportOptions {
+        embed_images: p.get("embedImages").and_then(Value::as_bool).unwrap_or(true),
+        fonts: Some(idml_fonts(st.doc.font_scope)),
+    };
     let layer_doc = with_pdf_layer_variants(&st.doc, opts.embed_images)?;
     let (bytes, warnings) = designcraft_idml::export_idml_report(layer_doc.as_ref().unwrap_or(&st.doc), &opts);
     let mut out = match str_param(p, "path") {
@@ -505,7 +523,7 @@ mod tests {
             Arc::make_mut(asset).link = Some(link.into());
             Ok(Value::Null)
         })?;
-        let bytes = designcraft_idml::export_idml_with(&session.doc()?.doc, &designcraft_idml::ExportOptions { embed_images });
+        let bytes = designcraft_idml::export_idml_with(&session.doc()?.doc, &designcraft_idml::ExportOptions { embed_images, fonts: None });
         Ok((bytes, png))
     }
 
@@ -514,7 +532,8 @@ mod tests {
         let mut session = Session::new();
         session.execute("file.new", &json!({})).unwrap();
         session.execute("frame.create", &json!({"rect": [36, 36, 300, 200], "content": "text"})).unwrap();
-        let idml = designcraft_idml::export_idml_with(&session.doc().unwrap().doc, &designcraft_idml::ExportOptions { embed_images: true });
+        let idml =
+            designcraft_idml::export_idml_with(&session.doc().unwrap().doc, &designcraft_idml::ExportOptions { embed_images: true, fonts: None });
         let (d, _, story_ids) = import_report_with_previews(&idml, None, &std::collections::HashMap::new()).unwrap();
         let (self_id, sid) = story_ids.iter().find(|(_, sid)| d.stories.get(*sid).is_some_and(|s| !s.frames.is_empty())).unwrap();
         let frame = d.stories[sid].frames[0];

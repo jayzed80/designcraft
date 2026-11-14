@@ -237,7 +237,7 @@ fn one_file_placed_several_times_imports_as_one_asset() {
     // Exported linked or embedded, the round trip keeps the two assets and each placement's crop
     // and transform.
     for embed_images in [false, true] {
-        let out = export_idml_with(&d, &ExportOptions { embed_images });
+        let out = export_idml_with(&d, &ExportOptions { embed_images, fonts: None });
         let back = import_idml_with(&out, &reader).unwrap();
         assert_eq!(back.assets.len(), 2, "embed_images: {embed_images}");
         let q = placements(&back);
@@ -310,7 +310,7 @@ fn a_pdf_placement_reads_its_page_number() {
     // Exported (linked or embedded), every placement writes its page and crop, page 1 included,
     // and both survive the round trip.
     for embed_images in [false, true] {
-        let out = export_idml_with(&d, &ExportOptions { embed_images });
+        let out = export_idml_with(&d, &ExportOptions { embed_images, fonts: None });
         let spreads = super::zip_text(&out, "Spreads/");
         assert_eq!(spreads.matches(r#"PDFCrop="CropMedia""#).count(), 3, "{spreads}");
         assert!(spreads.contains(r#"PageNumber="1""#) && spreads.contains(r#"PageNumber="2""#), "{spreads}");
@@ -407,7 +407,7 @@ fn export_past_the_embed_limit_warns_for_each_image_written_as_a_link() {
         frame(4, 300.0, 4.0, &image(4, "file:/elsewhere/copy.jpg", Some(&bytes))),
     ];
     let d = import_idml_with(&package(&frames), &reader).unwrap();
-    let opts = ExportOptions { embed_images: true };
+    let opts = ExportOptions { embed_images: true, fonts: None };
     // Four placements of 300 bytes each; the limit holds two.
     let (out, warnings) = crate::export::export_with_limit(&d, &opts, 700);
     assert_eq!(warnings.len(), 2, "{warnings:?}");
@@ -427,7 +427,7 @@ fn an_unlinked_image_is_embedded_past_the_embed_limit() {
     for a in d.assets.values_mut() {
         std::sync::Arc::make_mut(a).link = None;
     }
-    let (out, warnings) = crate::export::export_with_limit(&d, &ExportOptions { embed_images: true }, 100);
+    let (out, warnings) = crate::export::export_with_limit(&d, &ExportOptions { embed_images: true, fonts: None }, 100);
     assert!(warnings.is_empty(), "{warnings:?}");
     let back = import_idml_with(&out, &|_: &str| None).unwrap();
     assert!(!back.assets.is_empty() && back.assets.values().all(|a| a.data.as_slice() == bytes.as_slice()));
