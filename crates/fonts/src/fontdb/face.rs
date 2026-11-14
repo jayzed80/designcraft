@@ -279,11 +279,6 @@ impl FontFace {
             .as_deref()
     }
 
-    /// The version string (`name` ID 5), such as "Version 7.07", read from the font.
-    pub fn version(&self) -> Option<String> {
-        self.skrifa().and_then(|f| name(&f, &[StringId::VERSION_STRING]))
-    }
-
     /// Glyph id for `c` (0 = .notdef).
     pub fn glyph_for(&self, c: char) -> u32 {
         self.skrifa().and_then(|f| f.charmap().map(c)).map(|g| g.to_u32()).unwrap_or(0)

@@ -492,7 +492,7 @@ fn package(s: &mut Session, p: &Value) -> Result<Value> {
     if p.get("idml").and_then(Value::as_bool).unwrap_or(true) {
         let path = package_output_path(&dir, &title, "idml")?;
         // The images are in Links/ beside it: link them there, without embedded copies.
-        let opts = designcraft_idml::ExportOptions { embed_images: false, fonts: Some(super::interchange::idml_fonts(packed.font_scope)) };
+        let opts = designcraft_idml::ExportOptions { embed_images: false };
         root.write(&path, &designcraft_idml::export_idml_with(&packed, &opts))?;
         files.push(path);
         if super::interchange::has_applicable_pdf_layer_overrides(&packed) {
