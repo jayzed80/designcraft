@@ -32,21 +32,7 @@ impl DesignApp {
         if purpose == "place" {
             return self.place_path(&path, false);
         }
-        self.open_path(&path)
-    }
-
-    /// Open the file at `path` as File › Open does: a book file (.dcbook) opens in the Book panel,
-    /// as the panel's Open… does, rather than being read as a document (#2727); anything else opens
-    /// as a new document through `file.open`.
-    pub(crate) fn open_path(&mut self, path: &str) -> Result<Value, String> {
-        if !is_book_file(path) {
-            return self.open_file("file.open", json!({"path": path}));
-        }
-        let opened = self.open_file("book.open", json!({"path": path}))?;
-        if let Err(e) = self.run("window.panel.activate", json!({"panel": "book"})) {
-            log::warn!("{path}: {e}");
-        }
-        Ok(opened)
+        self.open_file("file.open", json!({"path": path}))
     }
 
     /// File › Place of the file at `path`, asking a multi-page PDF's Image Import Options first.
@@ -318,9 +304,8 @@ impl DesignApp {
         }
     }
 
-    /// A file dropped on the window: documents open, a book opens in the Book panel, the swatches
-    /// in a swatch exchange (.ase) file are loaded, an image loads into the place cursor, and
-    /// anything else is placed on the spread
+    /// A file dropped on the window: documents open, the swatches in a swatch exchange (.ase) file
+    /// are loaded, an image loads into the place cursor, and anything else is placed on the spread
     /// in view (a parent spread while parents are being edited). A file without an extension
     /// opens when its content is a DesignCraft or IDML document.
     pub fn open_dropped(&mut self, path: &str) -> Result<Value, String> {
@@ -386,9 +371,6 @@ impl DesignApp {
         if craft_file_formats::detect(path, &[]) == Some(craft_file_formats::Format::Ase) {
             return self.run("swatch.load", json!({"path": path}));
         }
-        if is_book_file(path) {
-            return self.open_path(path);
-        }
         let document = opens_as_document(path)
             || (std::path::Path::new(path).extension().is_none()
                 && designcraft_engine::io::read_capped(path, designcraft_engine::cmd::DOCUMENT_SNIFF_BYTES)
@@ -433,15 +415,15 @@ impl DesignApp {
     }
 
     /// Queue files the operating system asked the app to open. They can arrive before the window
-    /// exists (the event that launched the app); the first ready frame opens them as File › Open
-    /// does: a book in the Book panel, anything else as a new document through `file.open`.
+    /// exists (the event that launched the app); the first ready frame opens them, each as a new
+    /// document through `file.open`, as File › Open does.
     pub fn open_documents_later(&mut self, paths: impl IntoIterator<Item = String>) {
         self.os_documents.extend(paths);
     }
 
     pub(crate) fn open_os_documents(&mut self) {
         for path in std::mem::take(&mut self.os_documents) {
-            if let Err(e) = self.open_path(&path) {
+            if let Err(e) = self.open_file("file.open", json!({"path": path})) {
                 log::warn!("{path}: {e}");
             }
         }
@@ -580,11 +562,6 @@ pub(crate) fn is_cursor_image(name: &str) -> bool {
     std::path::Path::new(name).extension().and_then(|e| e.to_str()).is_some_and(|e| {
         matches!(e.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "tif" | "tiff" | "svg" | "psd" | "eps")
     })
-}
-
-/// A book file (.dcbook, any case), saved from the Book panel: it opens in that panel.
-fn is_book_file(name: &str) -> bool {
-    std::path::Path::new(name).extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("dcbook"))
 }
 
 /// Files that open as documents (when dropped or picked) rather than being placed: DesignCraft,
