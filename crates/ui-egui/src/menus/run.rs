@@ -626,6 +626,7 @@ fn run_ui_part2(app: &mut DesignApp, id: &str, p: &Value) -> Option<Result<Value
             });
             f["uiScale"] = json!((app.ui.ui_scale * 100.0).round());
             f["autoCollapseIconicPanels"] = json!(app.ui.dock_auto_collapse);
+            f["zoomWithScroll"] = json!(app.ui.zoom_with_scroll);
             // Interface: Cancel goes back to the theme Preferences opened with.
             f["brightness"] = json!(app.ui.brightness.id());
             f["openedBrightness"] = json!(app.ui.brightness.id());
@@ -1019,6 +1020,10 @@ fn run_ui_part5(app: &mut DesignApp, id: &str, p: &Value) -> Option<Result<Value
             app.ui.rich_black = p.get("on").and_then(Value::as_bool).unwrap_or(!app.ui.rich_black);
             app.canvas.shown = None;
             Ok(json!({"on": app.ui.rich_black}))
+        }
+        "window.zoomWithScroll" => {
+            app.ui.zoom_with_scroll = p.get("on").and_then(Value::as_bool).unwrap_or(!app.ui.zoom_with_scroll);
+            Ok(json!({"on": app.ui.zoom_with_scroll}))
         }
         "window.uiScale" => {
             let v = p.get("scale").and_then(Value::as_f64).unwrap_or(1.0) as f32;

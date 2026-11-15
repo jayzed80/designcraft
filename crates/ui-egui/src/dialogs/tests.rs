@@ -2991,6 +2991,29 @@ fn preferences_set_auto_collapse_iconic_panels() {
     assert_eq!(app.ui.dialog.as_ref().unwrap().fields["autoCollapseIconicPanels"], json!(true));
 }
 
+/// Preferences › Interface › Navigation › Zoom with Scroll Wheel (#2798): the checkbox, clicked in
+/// the dialog, turns the setting on with OK and shows it when Preferences opens again.
+#[test]
+fn preferences_set_zoom_with_scroll_wheel() {
+    let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+    app.run("app.preferences", json!({})).unwrap();
+    app.ui.dialog.as_mut().unwrap().fields.insert("section".into(), json!("interface"));
+    let ctx = dialog_context("en");
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0));
+    for _ in 0..3 {
+        dialog_frame(&mut app, &ctx, screen, vec![]);
+    }
+    let labels = dialog_frame(&mut app, &ctx, screen, vec![]);
+    visible_label(&labels, screen, "Navigation");
+    let check = visible_label(&labels, screen, "Zoom with Scroll Wheel").center();
+    click_dialog(&mut app, &ctx, screen, check);
+    assert_eq!(app.ui.dialog.as_ref().unwrap().fields["zoomWithScroll"], json!(true));
+    confirm(&mut app).unwrap();
+    assert!(app.ui.zoom_with_scroll);
+    app.run("app.preferences", json!({})).unwrap();
+    assert_eq!(app.ui.dialog.as_ref().unwrap().fields["zoomWithScroll"], json!(true));
+}
+
 #[test]
 fn preferences_sidebar_scroll_keeps_selected_options_visible() {
     let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());

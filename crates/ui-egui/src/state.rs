@@ -253,6 +253,9 @@ pub struct UiState {
     pub display_quality: designcraft_render::DisplayQuality,
     /// Preferences › Interface › UI scaling (1 = 100%).
     pub ui_scale: f32,
+    /// Preferences › Interface › Zoom with Scroll Wheel: the plain wheel zooms the canvas at the
+    /// pointer (Shift-wheel still scrolls) instead of needing Ctrl/Cmd or Alt.
+    pub zoom_with_scroll: bool,
     /// Preferences › Appearance of Black: 100% K on screen as rich black (InDesign's default,
     /// Display All Blacks as Rich Black; off: accurately, as dark grey).
     pub rich_black: bool,
@@ -436,6 +439,7 @@ impl Default for UiState {
             separations: None,
             display_quality: designcraft_render::DisplayQuality::High,
             ui_scale: 1.0,
+            zoom_with_scroll: false,
             rich_black: true,
             overprint_preview: false,
             shortcuts: Default::default(),

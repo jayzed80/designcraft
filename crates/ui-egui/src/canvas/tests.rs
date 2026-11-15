@@ -675,6 +675,31 @@ fn alt_wheel_zooms_at_the_pointer() {
     assert!(scrolled.zoom == back.zoom && scrolled.origin.y < back.origin.y, "{back:?} -> {scrolled:?}");
 }
 
+/// Preferences › Interface › Zoom with Scroll Wheel (#2798): off, the plain wheel scrolls; on, it
+/// zooms at the pointer as Alt-wheel does, and Shift-wheel still scrolls.
+#[test]
+fn zoom_with_scroll_wheel_preference() {
+    use egui::{Modifiers, TouchPhase::Move};
+    let mut h = new_document();
+    assert!(!h.state().ui.zoom_with_scroll, "off by default");
+    let rect = h.state().canvas_rect.unwrap();
+    let at = rect.center() + vec2(150.0, 90.0);
+    let before = *h.state().view().unwrap();
+    let scrolled = play(&mut h, at, &[held(Modifiers::NONE), wheel(Move, 100.0, Modifiers::NONE)]);
+    assert!(scrolled.zoom == before.zoom && scrolled.origin.y < before.origin.y, "off: the wheel scrolls {before:?} -> {scrolled:?}");
+
+    assert_eq!(h.state_mut().run("window.zoomWithScroll", json!({"on": true})).unwrap(), json!({"on": true}));
+    let under = Xf::new(rect, &scrolled).to_canvas(at);
+    let zoomed = play(&mut h, at, &[held(Modifiers::NONE), wheel(Move, 100.0, Modifiers::NONE)]);
+    assert!(zoomed.zoom > scrolled.zoom * 1.2, "on: wheel up zooms in: {} -> {}", scrolled.zoom, zoomed.zoom);
+    let still = Xf::new(rect, &zoomed).to_canvas(at);
+    assert!((still.x - under.x).abs() < 0.01 && (still.y - under.y).abs() < 0.01, "the point under the pointer stays: {under:?} -> {still:?}");
+    let back = play(&mut h, at, &[held(Modifiers::NONE), wheel(Move, -100.0, Modifiers::NONE)]);
+    assert!((back.zoom - scrolled.zoom).abs() < 1e-6, "wheel down zooms out: {} -> {}", zoomed.zoom, back.zoom);
+    let sideways = play(&mut h, at, &[held(Modifiers::SHIFT), wheel(Move, 100.0, Modifiers::SHIFT)]);
+    assert!(sideways.zoom == back.zoom && sideways.origin != back.origin, "Shift-wheel scrolls: {back:?} -> {sideways:?}");
+}
+
 /// Alt zooms exactly as Ctrl/Cmd does, also when the key is let go while the wheel's motion is
 /// still arriving: the rest of it zooms too and does not scroll the page.
 #[test]
