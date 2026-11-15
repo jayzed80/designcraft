@@ -119,12 +119,6 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ),
     ("window.richBlack", "Appearance of Black", None, "{on: bool} — show 100% black as rich black on screen (off: accurately)"),
     (
-        "window.zoomWithScroll",
-        "Zoom with Scroll Wheel",
-        None,
-        "{on?: bool} — the plain mouse wheel zooms the canvas at the pointer (Shift-wheel still scrolls); without on, toggles → {on}",
-    ),
-    (
         "window.setShortcut",
         "Set Shortcut",
         None,

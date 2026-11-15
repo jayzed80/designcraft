@@ -197,11 +197,6 @@ fn wheel_navigate(app: &mut DesignApp, ui: &egui::Ui, resp: &egui::Response, xf:
                 // Alt + wheel zooms by as much as Ctrl/Cmd + wheel, which egui turns into `zoom_delta`.
                 let speed = ui.ctx().options(|o| o.input_options.scroll_zoom_speed);
                 zoom_at(app, hp, (speed * (scroll.x + scroll.y)).exp() as f64);
-            } else if app.ui.zoom_with_scroll && !m.shift && scroll.y != 0.0 {
-                // Preferences › Interface › Zoom with Scroll Wheel: the plain wheel zooms as Alt-wheel
-                // does; Shift-wheel (sideways) still scrolls.
-                let speed = ui.ctx().options(|o| o.input_options.scroll_zoom_speed);
-                zoom_at(app, hp, (speed * scroll.y).exp() as f64);
             } else if scroll != egui::Vec2::ZERO
                 && let Some(v) = app.view_mut()
             {

@@ -2991,9 +2991,6 @@ fn preferences(app: &crate::DesignApp, ui: &mut egui::Ui, d: &mut Dialog, max_he
                         translated_combo(&lang, ui, d, "toolsColumns", &[("single", "Single Column"), ("double", "Double Column")])
                             .labelled_by(name.id);
                     });
-                    ui.add_space(8.0);
-                    crate::rtl::label(ui, egui::RichText::new(crate::i18n::tr(&lang, "Navigation")).font(semibold(12.0)));
-                    check(ui, d, "zoomWithScroll", crate::i18n::tr(&lang, "Zoom with Scroll Wheel"));
                 }
                 "uiScaling" => {
                     crate::rtl::label(ui, egui::RichText::new(crate::i18n::tr(&app.ui.language, "UI Scaling")).font(semibold(12.0)));
@@ -5297,9 +5294,6 @@ fn confirm_part4(app: &mut DesignApp, d: Dialog) -> Result<Value, String> {
             }
             if let Some(on) = d.fields.get("autoCollapseIconicPanels").and_then(Value::as_bool) {
                 app.ui.dock_auto_collapse = on;
-            }
-            if let Some(on) = d.fields.get("zoomWithScroll").and_then(Value::as_bool) {
-                app.run("window.zoomWithScroll", json!({"on": on}))?;
             }
             if d.fields.contains_key("snap.alignEdges") {
                 let mut snap = json!({
