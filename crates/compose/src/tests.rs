@@ -10140,3 +10140,37 @@ fn cross_reference_text_breaks_at_its_spaces() {
         }
     }
 }
+
+/// Tibetan sets syllables apart with the tsheg (U+0F0B), not spaces, and breaks lines after it
+/// (W3C tlreq): a justified paragraph of tsheg-separated syllables wraps between syllables, never
+/// inside one, never after a nonbreaking tsheg (U+0F0C) and never before a shad (#2692). Without
+/// those breaks the text took emergency breaks inside syllables.
+#[test]
+fn tibetan_text_breaks_after_tsheg() {
+    use crate::breaker::tibetan_break_between;
+    assert!(tibetan_break_between('\u{0F0B}', 'ཀ'));
+    assert!(!tibetan_break_between('\u{0F0C}', 'ཀ'), "the nonbreaking tsheg holds");
+    assert!(!tibetan_break_between('\u{0F0B}', '\u{0F0D}'), "no line starts with a shad");
+    assert!(!tibetan_break_between('ཀ', 'ཁ'));
+    let syllables = ["བོད", "ཀྱི", "སྐད", "ཡིག", "ནི", "ཡི", "གེ", "སུམ", "ཅུ", "དང", "དབྱངས", "བཞི", "ཡོད"];
+    let mut text = String::new();
+    for k in 0..12 {
+        for s in &syllables {
+            text.push_str(s);
+            text.push('\u{0F0B}');
+        }
+        text.push_str(if k % 2 == 0 { "དང\u{0F0B}\u{0F0D}" } else { "ཀ\u{0F0C}ཁ\u{0F0B}" });
+    }
+    for composer in [designcraft_doc::Composer::Paragraph, designcraft_doc::Composer::SingleLine] {
+        let para = ParaAttrs { align: Some(Align::LeftJustified), composer: Some(composer), ..Default::default() };
+        let (d, sid, _) = doc_with(&text, Rect::new(36.0, 36.0, 236.0, 2000.0), para);
+        let cs = compose_story(&d, sid, &ComposeOptions::default());
+        let lines = all_lines(&cs);
+        assert!(lines.len() > 2, "{composer:?}: wraps");
+        for l in &lines[..lines.len() - 1] {
+            let s = &text[l.range.clone()];
+            assert!(s.ends_with('\u{0F0B}'), "{composer:?}: a line breaks inside a syllable: {s:?}");
+            assert!(!s.starts_with('\u{0F0D}'), "{composer:?}: a line starts with a shad: {s:?}");
+        }
+    }
+}
