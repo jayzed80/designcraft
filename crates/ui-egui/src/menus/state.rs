@@ -61,10 +61,8 @@ pub fn native_key_equivalent(sc: &str) -> bool {
     let Ok(binding) = craft_keymap::Binding::parse(sc) else { return false };
     let chord = binding.trigger.chord;
     let (mods, key) = (chord.mods, chord.key);
-    if mods.cmd || mods.ctrl {
-        return true;
-    }
-    mods.alt && !(key.is_letter() || key.is_digit() || key.is_symbol() || key == craft_keymap::Key::Space)
+    let _ = key;
+    mods.cmd || mods.ctrl || mods.alt
 }
 
 /// The shortcut a menu row shows: its own binding (a panel's), else its command's.
