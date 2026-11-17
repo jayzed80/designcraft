@@ -293,18 +293,9 @@ pub(crate) fn cjk_pair(a: &Glyph, b: &Glyph, korean_char_breaks: bool) -> bool {
     cjk(a) || cjk(b)
 }
 
-/// [`cjk_break_between`] for glyphs `a` and `b` (see [`cjk_pair`]), or a Tibetan syllable
-/// boundary ([`tibetan_break_between`]).
+/// [`cjk_break_between`] for glyphs `a` and `b` (see [`cjk_pair`]).
 fn cjk_break(a: &Glyph, b: &Glyph, sp: &Spacing) -> bool {
-    (cjk_pair(a, b, sp.korean_char_breaks) && kinsoku_allows(a.ch, b.ch)) || tibetan_break_between(a.ch, b.ch)
-}
-
-/// A line may break between `a` and `b` in Tibetan text after the intersyllabic tsheg (U+0F0B),
-/// which separates syllables as spaces separate words (W3C tlreq), but not before a shad or other
-/// closing mark (U+0F0D–U+0F14), so `དང་།` stays together. The nonbreaking tsheg (U+0F0C) gives no
-/// break.
-pub fn tibetan_break_between(a: char, b: char) -> bool {
-    a == '\u{0F0B}' && !matches!(b, '\u{0F0B}'..='\u{0F14}')
+    cjk_pair(a, b, sp.korean_char_breaks) && kinsoku_allows(a.ch, b.ch)
 }
 
 pub fn is_forced(c: char) -> bool {
