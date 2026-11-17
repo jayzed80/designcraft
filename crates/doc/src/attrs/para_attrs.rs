@@ -113,10 +113,7 @@ attr_set! {
         kinsoku: Option<crate::cjk::Kinsoku> = None => "deserialize_explicit_value",
         /// Preserved spacing-table reference; compatibility audit reports unsupported composition.
         mojikumi: String = String::new(),
-        /// JIS X 4051 禁則処理 type, applied by both composers to CJK text: empty (the default)
-        /// and `KinsokuPushInFirst` compose as push-in-first, `KinsokuPushOutFirst`,
-        /// `KinsokuPushOutOnly` and `KinsokuPrioritizeAdjustmentAmount` (minimum adjustment) as
-        /// their names say.
+        /// Preserved priority policy; the current breaker does not implement these priorities.
         kinsoku_type: String = String::new(),
         kinsoku_hang: crate::cjk::KinsokuHang = crate::cjk::KinsokuHang::None,
         bunri_kinshi: bool = false,

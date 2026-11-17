@@ -1,6 +1,6 @@
 use super::common::{TagEntry, blend, norm, rects_overlap, solid_fill, tf, to_path};
 use super::graphics::draw_coverage;
-use super::pipeline::{drawn_children, form_fields_exported, item_exported, layer_exported, shown_parent_items};
+use super::pipeline::{drawn_children, item_exported, layer_exported, shown_parent_items};
 use super::*;
 
 impl Exporter<'_> {
@@ -295,19 +295,14 @@ impl Exporter<'_> {
         if frame_art {
             s.end_tagged();
         }
-        // A form field's frame content is editor content: the widget shows the field, so its
-        // text must not reach the page content, where it stays extractable (#2810). PDF/A and
-        // PDF/X leave the fields out, so there the frame content stays.
-        let draw_content = it.form_field.is_none() || !form_fields_exported(self.opts);
         // A text frame's anchored objects are drawn under its text when they can be.
-        let drawn = draw_content && self.draw_leaf_content(s, it, xf, bp, path, page);
+        let drawn = self.draw_leaf_content(s, it, xf, bp, path, page);
         self.draw_leaf_stroke(s, it, bp, path, frame_art);
         s.pop();
         for _ in 0..pushes {
             s.pop();
         }
-        if draw_content
-            && let Content::Text(tfr) = &it.content
+        if let Content::Text(tfr) = &it.content
             && !drawn
         {
             let cs = self.composed(tfr.story, page);

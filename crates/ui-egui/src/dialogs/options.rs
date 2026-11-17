@@ -267,7 +267,7 @@ pub fn open_layer_options(app: &mut DesignApp, id: Option<u64>) -> Result<(), St
     let id = id.map_or(st.active_layer, designcraft_doc::LayerId);
     let l = st.doc.layer(id).ok_or("no such layer")?;
     let f = json!({"id": l.id.0, "name": l.name, "rgb": l.color, "visible": l.visible, "locked": l.locked, "printable": l.printable,
-        "showGuides": l.show_guides, "lockGuides": l.lock_guides, "suppressWrapWhenHidden": l.suppress_wrap_when_hidden});
+        "showGuides": l.show_guides, "suppressWrapWhenHidden": l.suppress_wrap_when_hidden});
     app.ui.dialog = Some(Dialog::new("layerSettings", f));
     Ok(())
 }
@@ -302,14 +302,11 @@ pub fn layer_options(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
         ui.end_row();
     });
     ui.add_space(6.0);
-    // As InDesign's: the layer's options on the left, its guides' on the right.
     egui::Grid::new("layer_flags").num_columns(2).spacing([16.0, 6.0]).show(ui, |ui| {
         check(ui, d, "visible", tr(lang, "Show Layer"));
-        check(ui, d, "showGuides", tr(lang, "Show Guides"));
-        ui.end_row();
         check(ui, d, "locked", tr(lang, "Lock Layer"));
-        check(ui, d, "lockGuides", tr(lang, "Lock Guides"));
         ui.end_row();
+        check(ui, d, "showGuides", tr(lang, "Show Guides"));
         check(ui, d, "printable", tr(lang, "Print Layer"));
         ui.end_row();
     });
@@ -319,7 +316,7 @@ pub fn layer_options(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
 
 pub fn confirm_layer_options(app: &mut DesignApp, d: &Dialog) -> Result<Value, String> {
     let mut p = json!({"id": d.fields.get("id").cloned().unwrap_or(Value::Null), "name": d.s("name"), "color": d.fields.get("rgb").cloned().unwrap_or(Value::Null)});
-    for k in ["visible", "locked", "printable", "showGuides", "lockGuides", "suppressWrapWhenHidden"] {
+    for k in ["visible", "locked", "printable", "showGuides", "suppressWrapWhenHidden"] {
         p[k] = json!(d.b(k));
     }
     app.run("layer.set", p)

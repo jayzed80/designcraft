@@ -1,6 +1,6 @@
 //! Type › Track Changes: record edits as inserted / deleted text; accept or reject them.
 
-use designcraft_doc::{ChangeMark, Document, Selection, Story, StoryId};
+use designcraft_doc::{ChangeMark, Document, Story, StoryId};
 use serde_json::{Value, json};
 
 use super::{CommandSpec, cmd, has_doc};
@@ -46,7 +46,7 @@ fn ranges(st: &Story, mark: ChangeMark) -> Vec<std::ops::Range<usize>> {
 }
 
 /// Accept (or reject) every change in `sid`.
-fn resolve(d: &mut Document, sel: &mut Selection, sid: StoryId, accept: bool) -> usize {
+fn resolve(d: &mut Document, sid: StoryId, accept: bool) -> usize {
     let (remove, keep) = if accept { (ChangeMark::Deleted, ChangeMark::Inserted) } else { (ChangeMark::Inserted, ChangeMark::Deleted) };
     let (removed, keep_count) = {
         let st = match d.story(sid) {
@@ -68,7 +68,6 @@ fn resolve(d: &mut Document, sel: &mut Selection, sid: StoryId, accept: bool) ->
         });
     }
     for r in removed {
-        super::notes::follow_delete(sel, sid, r.clone());
         d.adjust_text_ranges(sid, r, 0);
     }
     n
@@ -97,12 +96,10 @@ fn one(s: &mut Session, p: &Value, accept: bool) -> Result<Value> {
             }
         }
         if delete {
-            super::notes::follow_delete(sel, sid, r.clone());
             d.adjust_text_ranges(sid, r.clone(), 0);
         }
         if let Some(t) = &mut sel.text
             && t.story == sid
-            && t.cell.is_none()
         {
             let len = d.story(sid).map_or(0, |x| x.len());
             t.anchor = t.anchor.min(len);
@@ -166,11 +163,10 @@ fn all(s: &mut Session, p: &Value, accept: bool) -> Result<Value> {
         let ids: Vec<StoryId> = d.stories.keys().copied().filter(|id| only.is_none_or(|o| o == *id)).collect();
         let mut n = 0;
         for id in ids {
-            n += resolve(d, sel, id, accept);
+            n += resolve(d, id, accept);
         }
-        // A body-text edit must not clamp a cell or note caret against the body length.
+        // The caret may now be past the end.
         if let Some(t) = &mut sel.text
-            && t.cell.is_none()
             && let Some(st) = d.story(t.story)
         {
             t.anchor = t.anchor.min(st.len());

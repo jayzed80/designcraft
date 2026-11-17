@@ -311,12 +311,7 @@ pub fn specs() -> Vec<CommandSpec> {
             load(&path)?;
             let mut b = s.book.as_ref().ok_or_else(no_book)?.clone();
             let at = p.get("at").and_then(Value::as_u64).map_or(b.documents.len(), |i| (i as usize).min(b.documents.len()));
-            // Keep a valid existing source attached to its chapter when inserting before it.
-            let shift_source = b.style_source < b.documents.len() && at <= b.style_source;
             b.documents.insert(at, path);
-            if shift_source {
-                b.style_source += 1;
-            }
             save(&b)?;
             s.book = Some(b);
             ok()
@@ -328,9 +323,6 @@ pub fn specs() -> Vec<CommandSpec> {
                 return Err(bad("book.remove", format!("no document {i}")));
             }
             b.documents.remove(i);
-            if i < b.style_source {
-                b.style_source -= 1;
-            }
             if b.style_source >= b.documents.len() {
                 b.style_source = 0;
             }

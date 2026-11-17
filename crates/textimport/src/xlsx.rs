@@ -38,11 +38,9 @@ fn sheet_cells(
     let mut cut = false;
     let result = package.sheet(entry, |row| {
         for cell in row.cells {
-            let value = match cell.value {
-                // A value that doesn't read as its type says (`inf`, `n/a` in a number cell) is
-                // shown as written, as the importer did before the shared reader.
-                craft_xlsx::CellValue::Invalid(raw) => raw,
-                value => display(value.resolve(&strings, date_1904)),
+            let value = match &cell.value {
+                craft_xlsx::CellValue::Invalid(s) => s.clone(),
+                other => display(other.resolve(&strings, date_1904)),
             };
             text_bytes = text_bytes.saturating_add(value.len());
             if cells.len() >= max_cells || text_bytes > max_text_bytes {

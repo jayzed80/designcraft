@@ -54,25 +54,19 @@ pub fn specs() -> Vec<CommandSpec> {
             has_doc,
             delete
         ),
-        cmd!(
-            "guide.deleteAll",
-            "Delete All Guides on Spread",
-            ["View", "Grids & Guides"],
-            None,
-            "{spread?} — a locked guide, and the guides of a layer that is locked, hidden or locks its guides, stay → {deleted}",
-            has_doc,
-            |s, p| {
-                let r = super::spread_param(p, "guide.deleteAll")?;
-                s.edit(|d, sel| {
-                    let keep = kept_guides(d, r).ok_or_else(|| bad("guide.deleteAll", "no such spread"))?;
-                    let sp = d.spread_mut(r).ok_or_else(|| bad("guide.deleteAll", "no such spread"))?;
-                    let n: usize = sp.pages.iter_mut().zip(&keep).map(|(pg, keep)| drop_editable(&mut pg.guides, keep)).sum();
-                    // The guides kept can't be selected: the spread's selected guides are gone.
-                    sel.guides.retain(|g| g.spread != r);
-                    Ok(json!({"deleted": n}))
-                })
-            }
-        ),
+        cmd!("guide.deleteAll", "Delete All Guides on Spread", ["View", "Grids & Guides"], None, "{spread?}", has_doc, |s, p| {
+            let r = super::spread_param(p, "guide.deleteAll")?;
+            s.edit(|d, sel| {
+                let sp = d.spread_mut(r).ok_or_else(|| bad("guide.deleteAll", "no such spread"))?;
+                let mut n = 0;
+                for pg in &mut sp.pages {
+                    n += pg.guides.len();
+                    pg.guides.clear();
+                }
+                sel.guides.retain(|g| g.spread != r);
+                Ok(json!({"deleted": n}))
+            })
+        }),
         cmd!(
             "view.lockColumnGuides",
             "Lock Column Guides",
@@ -118,7 +112,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Select All Guides",
             ["Edit"],
             Some("Cmd+Alt+G"),
-            "{spread?} — every guide on the spread that is not locked or on a layer that is locked, hidden or locks its guides → {selected: n}",
+            "{spread?} — every guide on the spread that is not locked or on a locked or hidden layer → {selected: n}",
             has_doc,
             select_all
         ),
@@ -572,7 +566,6 @@ fn create_guides(s: &mut Session, p: &Value) -> Result<Value> {
         .ok_or_else(|| bad("layout.createGuides", format!("a single command may create at most {MAX_GUIDES_CREATED} guides")))?;
     let layer = s.doc()?.active_layer;
     s.edit(|d, sel| {
-        let keep = kept_guides(d, r).ok_or_else(|| bad("layout.createGuides", "no such spread"))?;
         if remove {
             // The cleared pages' guide addresses name the new guides now.
             sel.guides.retain(|g| g.spread != r || only.is_some_and(|o| o != g.page));
@@ -584,7 +577,7 @@ fn create_guides(s: &mut Session, p: &Value) -> Result<Value> {
                 continue;
             }
             if remove {
-                drop_editable(&mut pg.guides, keep.get(pi).map_or(&[][..], Vec::as_slice));
+                pg.guides.clear();
             }
             let area: Rect = if to_page { pg.bounds() } else { pg.margin_rect() };
             for y in grid_positions(area.y0, area.y1, rows, rg)? {
@@ -612,20 +605,6 @@ fn create_guides(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok(json!({"guides": n}))
     })
-}
-
-/// Per page of spread `r`, the guides that can't be edited (locked, or on a layer that is locked,
-/// hidden or locks its guides): what removing guides leaves. `None` without the spread.
-fn kept_guides(d: &designcraft_doc::Document, r: designcraft_doc::SpreadRef) -> Option<Vec<Vec<bool>>> {
-    Some(d.spread(r)?.pages.iter().map(|pg| pg.guides.iter().map(|g| !g.editable_in(d)).collect()).collect())
-}
-
-/// Remove the guides `keep` doesn't mark (the editable ones); returns how many went.
-fn drop_editable(guides: &mut Vec<Guide>, keep: &[bool]) -> usize {
-    let before = guides.len();
-    let mut keep = keep.iter();
-    guides.retain(|_| keep.next().copied().unwrap_or(false));
-    before - guides.len()
 }
 
 #[cfg(test)]

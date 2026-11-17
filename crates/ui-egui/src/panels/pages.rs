@@ -293,16 +293,8 @@ const LAYOUT_COL_MIN: f32 = 96.0;
 /// A spread's label under its thumbnails, as InDesign's: one name for a single page, "2–3" for
 /// pages numbered on in one section (an en dash), and the names apart ("2, 1", "8, A") when a section starts
 /// inside the spread.
-/// The names read left to right as the thumbnails are drawn, so a spread bound right to left
-/// lists its second page first.
 pub(crate) fn spread_label(app: &DesignApp, doc: &designcraft_doc::Document, first: usize, n: usize) -> String {
-    let mut order: Vec<usize> = (first..first + n).collect();
-    // In the order the thumbnails are drawn: by each page's x (a right-to-left pair shows its second page on the left).
-    if let Some(sp) = doc.page_loc(first).and_then(|(si, _)| doc.spreads.get(si)) {
-        let x = |abs: usize| sp.pages.get(abs.saturating_sub(first)).map_or(0.0, |p| p.x);
-        order.sort_by(|&a, &b| x(a).total_cmp(&x(b)));
-    }
-    let names: Vec<String> = order.into_iter().map(|abs| app.session.page_label(abs)).collect();
+    let names: Vec<String> = (first..first + n).map(|abs| app.session.page_label(abs)).collect();
     let starts = |abs: usize| abs == 0 || doc.sections.iter().any(|s| s.start == abs);
     match (names.first(), names.last()) {
         (Some(a), Some(b)) if names.len() > 1 => {
