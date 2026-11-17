@@ -82,23 +82,6 @@ fn fades(it: &Item) -> bool {
     basic_feather(it) || e.directional_feather.on && e.directional_feather.widths.iter().any(|w| *w > 0.0) || e.gradient_feather.on
 }
 
-/// The box a directional feather is measured from, in the item's inner space: the edges of what
-/// the object paints. A fill or a stroke paints the frame's path, and text its frame; a placed
-/// graphic paints the part of the image the frame shows, so an image smaller than or offset in
-/// its frame fades at its own edge, not in the empty part of the frame (as in InDesign).
-fn painted_bounds(it: &Item) -> Rect {
-    let frame = it.inner_bounds();
-    if !it.fill.is_none() || !it.stroke.is_none() {
-        return frame;
-    }
-    let Some(g) = it.graphic() else { return frame };
-    let Some(shown) = g.shown_bounds(frame) else { return frame };
-    // A clipping path crops the image further.
-    let Some((path, _)) = g.clip_region().filter(|(p, _)| !p.is_empty()) else { return shown };
-    let clipped = shown.intersect(path.bounding_box());
-    if clipped.width() > 0.0 && clipped.height() > 0.0 { clipped } else { shown }
-}
-
 /// (blur σ, growth) in points for an effect `size` with `pct` percent hardened.
 fn split(size: f64, pct: f64) -> (f64, f64) {
     let size = bound(size).max(0.0);
@@ -570,7 +553,7 @@ impl Renderer {
         // Directional feather: one fading ramp per side, multiplied in.
         let df = &e.directional_feather;
         if df.on && df.widths.iter().any(|w| *w > 0.0) {
-            let b = painted_bounds(it);
+            let b = it.inner_bounds();
             let area = if xf.determinant().abs() > 1e-12 { xf.inverse().transform_rect_bbox(reach) } else { b };
             let ramps = [
                 (df.widths[0], kurbo::Point::new(b.x0, b.y0), kurbo::Point::new(b.x0, b.y0 + df.widths[0])),
