@@ -946,6 +946,34 @@ fn form_field_border_follows_the_item_stroke() {
     assert!(stroked.contains("/BC"), "border colour");
 }
 
+/// A form field's frame text is editor content: the interactive export draws the widget, not
+/// the text under it, so private text can't be extracted from the file (#2810). The print
+/// standards leave form fields out, so there the frame text stays and nothing is lost.
+#[test]
+fn form_field_frame_text_is_not_exported() {
+    use designcraft_doc::{FieldKind, FormField};
+    let mut d = Document::new(&NewDocument::default());
+    let lid = d.default_layer();
+    let (id, _) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(72.0, 72.0, 250.0, 96.0), lid, "my private text", ParaFormat::default()).unwrap();
+    d.item_mut(id).unwrap().form_field = Some(FormField {
+        kind: FieldKind::TextField,
+        name: "Field".into(),
+        value: String::new(),
+        options: Vec::new(),
+        multiline: false,
+        required: false,
+        font_size: 0.0,
+    });
+    let bytes = export_pdf(&d, &Cache::new(), &PdfOptions::default()).unwrap();
+    let text = extract_text(&bytes).concat();
+    assert!(!text.contains("my private text"), "the field's frame text leaked into the PDF: {text:?}");
+    assert!(String::from_utf8_lossy(&bytes).contains("/Subtype/Widget"), "the field itself is exported");
+    for standard in [Standard::PdfX4, Standard::PdfA2b] {
+        let bytes = export_pdf(&d, &Cache::new(), &PdfOptions { standard, ..Default::default() }).unwrap();
+        assert!(extract_text(&bytes).concat().contains("my private text"), "{standard:?} leaves the field out, so its text stays");
+    }
+}
+
 #[test]
 fn extreme_page_selection_is_a_page_error_without_overflow() {
     let doc = doc_with_text("Bounded page selection");

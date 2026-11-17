@@ -1181,6 +1181,23 @@ fn export_pdf_of_the_sample() {
     assert!(s.execute("file.exportPdf", &json!({"standard": "bogus"})).is_err());
 }
 
+/// A frame converted to a form field keeps its text for editing, but the interactive PDF draws
+/// only the widget: the text under it must not stay in the page content, where it is
+/// extractable (#2810). An ordinary frame's text still exports.
+#[test]
+fn a_form_field_frame_text_does_not_leak_into_the_pdf() {
+    let mut s = Session::new();
+    s.execute("file.new", &json!({})).unwrap();
+    let field = s.execute("frame.create", &json!({"rect": [72, 72, 300, 120], "content": "text", "text": "my private text"})).unwrap()["id"].clone();
+    s.execute("frame.create", &json!({"rect": [72, 200, 300, 248], "content": "text", "text": "my private text"})).unwrap();
+    s.execute("form.set", &json!({"ids": [field], "kind": "textField", "name": "Field"})).unwrap();
+    let r = s.execute("file.exportPdf", &json!({})).unwrap();
+    let bytes = cmd::base64_decode(r["base64"].as_str().unwrap());
+    assert!(String::from_utf8_lossy(&bytes).contains("/Subtype/Widget"), "the field is exported");
+    let text = pdf_text(&bytes).concat();
+    assert_eq!(text.matches("my private text").count(), 1, "only the plain frame's text exports: {text:?}");
+}
+
 #[test]
 fn object_set_flags_and_wrap_invert() {
     let mut s = session();
