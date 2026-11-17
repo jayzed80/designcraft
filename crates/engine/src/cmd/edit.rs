@@ -541,7 +541,9 @@ fn copy_items(s: &mut Session) -> Result<()> {
     let clip = clip_doc(s)?;
     let st = s.doc()?;
     let spread = st.selection.items.iter().find_map(|id| st.doc.find(*id)).and_then(|loc| st.doc.spread(loc.spread));
+    let content_copy = st.selection.content;
     s.clipboard_origin = spread.map_or(0.0, paste_origin);
+    s.clipboard_content = content_copy;
     s.clipboard = Some(Arc::new(clip));
     Ok(())
 }
@@ -689,6 +691,7 @@ fn paste_into(s: &mut Session, p: &Value) -> Result<Value> {
     if ids.is_empty() {
         return Err(super::bad("edit.pasteInto", "the clipboard holds no objects"));
     }
+    let content_copy = s.clipboard_content;
     s.edit(|d, sel| {
         let loc = d.find(target).ok_or(designcraft_doc::DocError::NoItem(target))?;
         let frame = d.item_at(&loc).ok_or(designcraft_doc::DocError::NoItem(target))?.clone();
@@ -696,7 +699,7 @@ fn paste_into(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(super::bad("edit.pasteInto", "paste into a graphic or empty frame (not a group or text frame)"));
         }
         let world = d.parent_xf(&loc) * frame.xf;
-        // Copies on the frame's spread (stories and images come along), then nested in the frame.
+        // Copies on the frame's spread (stories and images come along), then put in the frame.
         let new = super::object::duplicate_from(d, &clip, &ids, loc.spread, designcraft_geom::Vec2::ZERO)?;
         let mut kids = Vec::new();
         for id in &new {
@@ -715,7 +718,23 @@ fn paste_into(s: &mut Session, p: &Value) -> Result<Value> {
             })
             .collect();
         let it = d.item_mut(target).ok_or(designcraft_doc::DocError::NoItem(target))?;
-        it.content = designcraft_doc::Content::Group { items: kids };
+        // A copied image (Direct Selection) fills an empty frame as its graphic, as placing one
+        // does: the frame stays a graphic frame, so it resizes and fits as one (#2894). Anything
+        // else, and a frame that already holds content, gets the copies as pasted-in items.
+        let mut graphic = None;
+        if content_copy
+            && matches!(it.content, designcraft_doc::Content::Unassigned)
+            && let [kid] = kids.as_slice()
+            && let designcraft_doc::Content::Graphic(g) = &kid.content
+        {
+            let mut g = g.clone();
+            g.xf = kid.xf * g.xf;
+            graphic = Some(g);
+        }
+        it.content = match graphic {
+            Some(g) => designcraft_doc::Content::Graphic(g),
+            None => designcraft_doc::Content::Group { items: kids },
+        };
         *sel = Selection::items(vec![target]);
         Ok(json!({"id": target.0, "items": new.len()}))
     })
@@ -771,13 +790,14 @@ mod paste_into_tests {
         assert!(matches!(&it.content, designcraft_doc::Content::Graphic(g) if g.crop == [0.0; 4]));
         assert_eq!(it.bounds(), designcraft_geom::Rect::new(50.0, 100.0, 250.0, 200.0));
         assert!(it.stroke.weight == 0.0 || it.stroke.swatch == "[None]", "{:?}", it.stroke);
-        // Paste Into a shape over it: the photo lands in place, inside the shape.
+        // Paste Into a shape over it: the photo lands in place, inside the shape, as its graphic.
         let shape = s.execute("frame.create", &json!({"rect": [60, 90, 240, 210], "shape": "ellipse"})).unwrap()["id"].as_u64().unwrap();
         s.execute("selection.set", &json!({"ids": [shape]})).unwrap();
         s.execute("edit.pasteInto", &json!({})).unwrap();
         let d = s.doc().unwrap().doc.clone();
-        let kid = d.item(ItemId(shape)).unwrap().children()[0].clone();
-        let at = d.parent_xf(&d.find(kid.id).unwrap()) * kid.xf;
+        let it = d.item(ItemId(shape)).unwrap();
+        let designcraft_doc::Content::Graphic(g) = &it.content else { panic!("the photo is the shape's graphic: {:?}", it.content) };
+        let at = it.xf * g.xf;
         assert!((at * designcraft_geom::Point::new(0.0, 0.0) - designcraft_geom::Point::new(50.0, 100.0)).hypot() < 1e-6);
         assert!((at * designcraft_geom::Point::new(200.0, 100.0) - designcraft_geom::Point::new(250.0, 200.0)).hypot() < 1e-6);
         // Delete with the photo selected: the frame stays, empty.
@@ -787,6 +807,56 @@ mod paste_into_tests {
         assert!(matches!(d.item(ItemId(frame)).unwrap().content, designcraft_doc::Content::Unassigned));
         assert_eq!(s.doc().unwrap().selection, Selection::items(vec![ItemId(frame)]));
         d.check().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #2894: a copied image (Direct Selection) pasted into an empty frame is the frame's graphic,
+    /// as a placed image is: resizing the frame leaves the image at its size and Fitting applies.
+    #[test]
+    fn a_copied_graphic_pasted_into_an_empty_frame_is_its_graphic() {
+        let dir = std::env::temp_dir().join(format!("dc-paste-into-graphic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let png = dir.join("photo.png");
+        std::fs::write(&png, designcraft_render::Rendered { width: 200, height: 100, pixels: vec![40u8; 200 * 100 * 4] }.to_png()).unwrap();
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        let first = s.execute("frame.create", &json!({"rect": [100, 100, 200, 200]})).unwrap()["id"].as_u64().unwrap();
+        s.execute("file.place", &json!({"path": png.to_string_lossy(), "frame": first})).unwrap();
+        s.execute("object.fit", &json!({"mode": "fillProportionally", "ids": [first]})).unwrap();
+        // Direct Selection on the photo, Copy, then Paste Into an empty frame.
+        s.execute("selection.set", &json!({"ids": [first], "content": true})).unwrap();
+        s.execute("edit.copy", &json!({})).unwrap();
+        let second = s.execute("frame.create", &json!({"rect": [300, 100, 400, 200]})).unwrap()["id"].as_u64().unwrap();
+        s.execute("selection.set", &json!({"ids": [second]})).unwrap();
+        s.execute("edit.pasteInto", &json!({})).unwrap();
+        let d = s.doc().unwrap().doc.clone();
+        let it = d.item(ItemId(second)).unwrap();
+        assert!(matches!(it.content, designcraft_doc::Content::Graphic(_)), "the photo is the frame's graphic: {:?}", it.content);
+        assert!(!it.has_nested_items(), "not a frame holding pasted-in items");
+        let placed = |s: &Session, id: u64| {
+            let d = &s.doc().unwrap().doc;
+            let it = d.item(ItemId(id)).unwrap();
+            let designcraft_doc::Content::Graphic(g) = &it.content else { return designcraft_geom::Rect::ZERO };
+            it.xf.transform_rect_bbox(g.xf.transform_rect_bbox(designcraft_geom::Rect::new(0.0, 0.0, g.size.0, g.size.1)))
+        };
+        // The whole photo, centred on the frame it was pasted into.
+        assert_eq!(placed(&s, second), designcraft_geom::Rect::new(250.0, 100.0, 450.0, 200.0));
+        // The Selection tool drags the frame's handle: the frame takes the new box and the photo
+        // keeps its size and place, as in the frame it came from.
+        s.execute("transform.resize", &json!({"ids": [second], "from": [300, 100, 400, 200], "to": [300, 100, 500, 250]})).unwrap();
+        let d = s.doc().unwrap().doc.clone();
+        assert_eq!(d.item(ItemId(second)).unwrap().bounds(), designcraft_geom::Rect::new(300.0, 100.0, 500.0, 250.0));
+        assert_eq!(placed(&s, second), designcraft_geom::Rect::new(250.0, 100.0, 450.0, 200.0), "the photo keeps its size");
+        // Fitting applies to the photo: Fit Content Proportionally shows all of it in the frame.
+        s.execute("object.fit", &json!({"mode": "fitProportionally", "ids": [second]})).unwrap();
+        assert_eq!(placed(&s, second), designcraft_geom::Rect::new(300.0, 125.0, 500.0, 225.0));
+        // A frame that already holds a graphic keeps the pasted one as a pasted-in item.
+        s.execute("selection.set", &json!({"ids": [first], "content": true})).unwrap();
+        s.execute("edit.copy", &json!({})).unwrap();
+        s.execute("selection.set", &json!({"ids": [second]})).unwrap();
+        s.execute("edit.pasteInto", &json!({})).unwrap();
+        assert!(s.doc().unwrap().doc.item(ItemId(second)).unwrap().has_nested_items());
+        s.doc().unwrap().doc.check().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

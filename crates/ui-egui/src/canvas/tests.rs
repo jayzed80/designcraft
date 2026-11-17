@@ -1953,6 +1953,30 @@ fn right_clicking_an_object_selects_it_and_its_menu_arranges_it() {
     assert!(menu_row(&h, "Arrange").is_none(), "choosing an entry closes the menu");
 }
 
+/// #2894: an image pasted into an empty frame (Edit › Paste Into of a Direct Selection copy) makes
+/// the frame a graphic frame, so its menu offers Fitting, as a frame with a placed image does.
+#[test]
+fn right_clicking_a_frame_with_a_pasted_in_image_offers_fitting() {
+    let dir = tempfile::tempdir().unwrap();
+    let png = dir.path().join("photo.png");
+    std::fs::write(&png, designcraft_render::Rendered { width: 40, height: 20, pixels: vec![90; 40 * 20 * 4] }.to_png()).unwrap();
+    let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+    app.run("file.new", json!({})).unwrap();
+    let first = app.run("frame.create", json!({"rect": [36, 36, 136, 136]})).unwrap()["id"].as_u64().unwrap();
+    app.run("file.place", json!({"path": png.to_string_lossy(), "frame": first})).unwrap();
+    app.run("selection.set", json!({"ids": [first], "content": true})).unwrap();
+    app.run("edit.copy", json!({})).unwrap();
+    let second = app.run("frame.create", json!({"rect": [200, 36, 300, 136]})).unwrap()["id"].as_u64().unwrap();
+    app.run("selection.set", json!({"ids": [second]})).unwrap();
+    app.run("edit.pasteInto", json!({})).unwrap();
+    app.run("selection.set", json!({"ids": [second]})).unwrap();
+    let mut h = harness(app);
+    let on_second = screen_of(&h, 250.0, 80.0);
+    right_click(&mut h, on_second);
+    assert_eq!(selected(&h), [second]);
+    assert!(menu_row(&h, "Fitting").is_some(), "the pasted image is the frame's graphic");
+}
+
 #[test]
 fn right_clicking_empty_canvas_offers_paste_after_a_copy() {
     let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());

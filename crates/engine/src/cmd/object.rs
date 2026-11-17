@@ -1451,7 +1451,7 @@ fn transform_resize(s: &mut Session, p: &Value) -> Result<Value> {
                 scale_object(d, *id, m, (sx * sy).abs().sqrt(), strokes);
             } else if it.flex.is_some() {
                 resize_container(it, m);
-            } else if matches!(it.content, Content::Group { .. }) {
+            } else if it.is_group() {
                 it.xf = m * it.xf;
             } else {
                 // Resize the frame's path (in inner space); content keeps its size (InDesign's
@@ -1854,7 +1854,7 @@ fn transform_set(s: &mut Session, p: &Value) -> Result<Value> {
             if let Some(it) = d.item_mut(*id) {
                 if it.flex.is_some() {
                     resize_container(it, m);
-                } else if matches!(it.content, Content::Group { .. }) {
+                } else if it.is_group() {
                     it.xf = m * it.xf;
                 } else {
                     let inner = it.xf.inverse() * m * it.xf;
@@ -4834,6 +4834,40 @@ mod fitting_tests {
         s.execute("transform.resize", &json!({"ids": [id], "from": [100, 100, 200, 100], "to": [100, 100, 300, 100]})).unwrap();
         let r = s.doc().unwrap().doc.item(ItemId(id)).unwrap().bounds();
         assert!((r.x0 - 100.0).abs() < 1e-9 && (r.x1 - 300.0).abs() < 1e-9 && (r.y0 - 100.0).abs() < 1e-9 && r.height().abs() < 1e-9, "{r:?}");
+    }
+
+    /// #2894: a frame holding pasted-in items is a frame, not a group: dragging its handle resizes
+    /// the frame and leaves the items where they are (InDesign keeps content's size on a frame
+    /// resize), for the Control panel's width and height too.
+    #[test]
+    fn a_frame_with_pasted_in_items_resizes_as_a_frame() {
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        let inner = s.execute("frame.create", &json!({"rect": [150, 150, 250, 250]})).unwrap()["id"].as_u64().unwrap();
+        s.execute("selection.set", &json!({"ids": [inner]})).unwrap();
+        s.execute("edit.cut", &json!({})).unwrap();
+        let frame = s.execute("frame.create", &json!({"rect": [100, 100, 300, 300]})).unwrap()["id"].as_u64().unwrap();
+        s.execute("selection.set", &json!({"ids": [frame]})).unwrap();
+        s.execute("edit.pasteInto", &json!({})).unwrap();
+        let pasted = |s: &Session| {
+            let d = &s.doc().unwrap().doc;
+            let it = d.item(ItemId(frame)).unwrap();
+            let kid = &it.children()[0];
+            (d.parent_xf(&d.find(kid.id).unwrap()) * kid.xf).transform_rect_bbox(kid.inner_bounds())
+        };
+        let near =
+            |a: Rect, b: Rect| (a.x0 - b.x0).abs() < 1e-6 && (a.y0 - b.y0).abs() < 1e-6 && (a.x1 - b.x1).abs() < 1e-6 && (a.y1 - b.y1).abs() < 1e-6;
+        let before = pasted(&s);
+        s.execute("transform.resize", &json!({"ids": [frame], "from": [100, 100, 300, 300], "to": [100, 100, 400, 300]})).unwrap();
+        let d = s.doc().unwrap().doc.clone();
+        assert!(near(d.item(ItemId(frame)).unwrap().bounds(), Rect::new(100.0, 100.0, 400.0, 300.0)), "the frame takes the new box");
+        assert!(near(pasted(&s), before), "the pasted frame keeps its size and place: {:?} → {:?}", before, pasted(&s));
+        // The Control panel's width field resizes it the same way.
+        s.execute("transform.set", &json!({"ids": [frame], "width": 400})).unwrap();
+        let d = s.doc().unwrap().doc.clone();
+        assert!(near(d.item(ItemId(frame)).unwrap().bounds(), Rect::new(100.0, 100.0, 500.0, 300.0)));
+        assert!(near(pasted(&s), before));
+        d.check().unwrap();
     }
 
     #[test]
