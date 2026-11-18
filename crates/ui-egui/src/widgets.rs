@@ -80,6 +80,7 @@ pub struct NumField<'a> {
     value: Option<f64>,
     kind: NumKind<'a>,
     width: f32,
+    height: f32,
     spinner: bool,
     presets: &'a [f64],
     step: Option<f64>,
@@ -90,6 +91,8 @@ pub struct NumField<'a> {
     label: Option<egui::Id>,
     /// What an unset value shows (InDesign's "Ignore"), and the first of the presets.
     empty: Option<&'a str>,
+    /// Select the whole value when a click gives the field the keyboard, as InDesign's fields do.
+    select_all: bool,
 }
 
 impl<'a> NumField<'a> {
@@ -116,6 +119,7 @@ impl<'a> NumField<'a> {
             value,
             kind,
             width: 72.0,
+            height: FIELD_H,
             spinner: false,
             presets: &[],
             step: None,
@@ -124,6 +128,7 @@ impl<'a> NumField<'a> {
             parens: false,
             label: None,
             empty: None,
+            select_all: false,
         }
     }
     /// The field's user-facing name, independent of its stable internal ID.
@@ -146,6 +151,17 @@ impl<'a> NumField<'a> {
     /// Total width (spinner and preset segments included).
     pub fn width(mut self, w: f32) -> Self {
         self.width = w;
+        self
+    }
+    /// Height of the field, for a compact one in a bar ([`FIELD_H`] in a panel).
+    pub fn height(mut self, h: f32) -> Self {
+        self.height = h;
+        self
+    }
+    /// Select the whole value when a click gives the field the keyboard, so a typed value
+    /// replaces it as in InDesign.
+    pub fn select_all_on_focus(mut self) -> Self {
+        self.select_all = true;
         self
     }
     /// Show the ⌃⌄ spinner segment on the left.
@@ -194,7 +210,7 @@ impl<'a> NumField<'a> {
         let step = self.step.unwrap_or_else(|| self.kind.step());
         let clamp = |v: f64| v.clamp(self.range.0, self.range.1);
         let mut out = None;
-        let seg = Rect::from_min_size(rect.min, vec2(SEG_W, FIELD_H));
+        let seg = Rect::from_min_size(rect.min, vec2(SEG_W, rect.height()));
         ui.painter().rect_filled(seg, 0.0, t.input);
         let up = Rect::from_min_max(seg.min, pos2(seg.max.x, seg.center().y));
         let down = Rect::from_min_max(pos2(seg.min.x, seg.center().y), seg.max);
@@ -229,7 +245,7 @@ impl<'a> NumField<'a> {
         let name = self.name.unwrap_or(self.id);
         let enabled = self.enabled && ui.is_enabled();
         let key = ui.scope_id().with(self.id);
-        let (rect, _) = ui.allocate_exact_size(vec2(self.width, FIELD_H), Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(vec2(self.width, self.height), Sense::hover());
         let step = self.step.unwrap_or_else(|| self.kind.step());
         let clamp = |v: f64| v.clamp(self.range.0, self.range.1);
         let mut out: Option<f64> = None;
@@ -278,6 +294,17 @@ impl<'a> NumField<'a> {
             editor_ui.disable();
         }
         let r = editor_ui.put(value_rect, te).accessible_name(name);
+        if self.select_all
+            && r.gained_focus()
+            && let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), focused_id)
+        {
+            // The click that gave the field the keyboard selects the whole value, as InDesign's
+            // fields do: a typed value replaces it rather than joining it.
+            state
+                .cursor
+                .set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(buf.chars().count()))));
+            state.store(ui.ctx(), focused_id);
+        }
         let r = match self.label {
             Some(id) => r.labelled_by(id),
             None => r,

@@ -1,4 +1,7 @@
-use super::{Color32, DesignApp, Sense, Stroke, Tokens, icons, json, panels, semibold, vec2};
+use super::{Color32, DesignApp, NumField, Sense, Stroke, Tokens, icons, json, panels, semibold, vec2};
+
+/// The zoom levels the status bar's arrow lists, as percentages (5% to 1600%, InDesign's set).
+const ZOOM_PRESETS: &[f64] = &[5.0, 12.5, 25.0, 50.0, 75.0, 100.0, 200.0, 400.0, 800.0, 1600.0];
 
 /// The widest a document tab grows: a longer name is shortened so its close button and the
 /// tabs after it stay in view.
@@ -175,15 +178,19 @@ pub fn status_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
                     ui.label(egui::RichText::new(&app.ui.status).font(small).color(t.text_dim));
                     return;
                 }
+                // The zoom percentage, as InDesign's: the number is a field (a click gives it the
+                // keyboard, its value selected) and the arrow beside it lists the presets.
                 let z = app.view().map(|v| v.zoom).unwrap_or(1.0);
-                crate::menus::menu_button(ui, egui::RichText::new(format!("{:.2}% ▾", z * 100.0)).font(small.clone()), |ui| {
-                    for p in [0.05, 0.125, 0.25, 0.5, 0.75, 1.0, 2.0, 4.0, 8.0, 16.0] {
-                        if ui.button(format!("{}%", p * 100.0)).clicked() {
-                            let _ = app.run("view.zoom", json!({"zoom": p}));
-                            ui.close();
-                        }
-                    }
-                });
+                let field = NumField::number("status_zoom", Some(z * 100.0), "%", 2)
+                    .name(crate::i18n::tr(&app.ui.language, "Zoom"))
+                    .width(62.0)
+                    .height(15.0)
+                    .range(5.0, 4000.0)
+                    .presets(ZOOM_PRESETS)
+                    .select_all_on_focus();
+                if let Some(pct) = field.show(ui) {
+                    let _ = app.run("view.zoom", json!({"zoom": pct / 100.0}));
+                }
                 ui.add_space(8.0);
                 let n = app.session.active().map(|d| d.doc.page_count()).unwrap_or(1);
                 let cur = crate::canvas::current_page(app).unwrap_or(0);

@@ -180,6 +180,56 @@ fn status_bar_error_count_opens_the_preflight_panel() {
     assert!(crate::panel_docking::showing(&h.state().app, "preflight"));
 }
 
+/// The zoom percentage at the bottom left is a field, as InDesign's: clicking the number gives
+/// it the keyboard, its value selected so a typed percentage replaces it (#2962).
+#[test]
+fn the_status_bar_zoom_field_takes_a_typed_percentage() {
+    use egui::accesskit::Role;
+    let mut app = app();
+    app.run("file.new", serde_json::json!({})).unwrap();
+    let mut h = test_window::open(app, vec2(1200.0, 700.0));
+    let (rect, shown) = {
+        let field = h.get_by(|n| n.role() == Role::TextInput && n.label().as_deref() == Some("Zoom"));
+        (field.rect(), field.value().unwrap_or_default())
+    };
+    assert!(shown.ends_with('%'), "the field shows the zoom: {shown:?}");
+    test_window::click_at(&mut h, rect.center());
+    assert!(h.ctx.text_edit_focused(), "a click on the number gives the field the keyboard");
+    h.event(egui::Event::Text("45%".into()));
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(2);
+    let zoom = h.state().app.view().unwrap().zoom;
+    assert!((zoom - 0.45).abs() < 1e-6, "the typed percentage applies: {zoom}");
+}
+
+/// The arrow beside the zoom percentage still opens the preset list, above the status bar, and
+/// picking a preset zooms as it did (#2962).
+#[test]
+fn the_status_bar_zoom_arrow_opens_the_preset_list() {
+    use egui::accesskit::Role;
+    let mut app = app();
+    app.run("file.new", serde_json::json!({})).unwrap();
+    let mut h = test_window::open(app, vec2(1200.0, 700.0));
+    let field = {
+        let field = h.get_by(|n| n.role() == Role::TextInput && n.label().as_deref() == Some("Zoom"));
+        field.rect()
+    };
+    h.get_by_label("Zoom presets").click();
+    h.run_steps(3);
+    assert!(!h.ctx.text_edit_focused(), "the arrow opens the list, not the field");
+    let item = {
+        let item = h.query_all_by_label("50%").find(|n| n.rect().bottom() <= field.top() + 1.0);
+        item.expect("50% in the list, above the status bar").rect()
+    };
+    assert!(item.bottom() <= field.top() + 1.0, "the list opens upwards: {item:?} above {field:?}");
+    // The menu, drawn last, holds the last match: a panel may show 50% too.
+    h.get_all_by_label("50%").last().expect("50% in the list").click();
+    h.run_steps(3);
+    let zoom = h.state().app.view().unwrap().zoom;
+    assert!((zoom - 0.5).abs() < 1e-6, "the preset zooms: {zoom}");
+}
+
 /// The course's chapter 25: while a parent is shown, the status bar's page box names it
 /// ("A-Parent"), as InDesign's. Its menu lists the pages, then the parents: a parent shows
 /// that parent, a page leaves the parents for that page.
