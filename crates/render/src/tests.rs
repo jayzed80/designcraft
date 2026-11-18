@@ -662,7 +662,7 @@ fn renders_tables() {
 }
 
 /// A one-page PDF (612 x 792 pt) that draws `content`.
-fn one_page_pdf(content: &str) -> Vec<u8> {
+pub(crate) fn one_page_pdf(content: &str) -> Vec<u8> {
     let objects = [
         "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
         "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
