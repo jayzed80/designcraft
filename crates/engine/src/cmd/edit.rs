@@ -540,8 +540,10 @@ pub fn specs() -> Vec<CommandSpec> {
 fn copy_items(s: &mut Session) -> Result<()> {
     let clip = clip_doc(s)?;
     let st = s.doc()?;
+    let content = st.selection.content;
     let spread = st.selection.items.iter().find_map(|id| st.doc.find(*id)).and_then(|loc| st.doc.spread(loc.spread));
     s.clipboard_origin = spread.map_or(0.0, paste_origin);
+    s.clipboard_content = content;
     s.clipboard = Some(Arc::new(clip));
     Ok(())
 }
@@ -689,6 +691,7 @@ fn paste_into(s: &mut Session, p: &Value) -> Result<Value> {
     if ids.is_empty() {
         return Err(super::bad("edit.pasteInto", "the clipboard holds no objects"));
     }
+    let graphic_alone = s.clipboard_content;
     s.edit(|d, sel| {
         let loc = d.find(target).ok_or(designcraft_doc::DocError::NoItem(target))?;
         let frame = d.item_at(&loc).ok_or(designcraft_doc::DocError::NoItem(target))?.clone();
@@ -707,6 +710,24 @@ fn paste_into(s: &mut Session, p: &Value) -> Result<Value> {
         let cb = kids.iter().map(|k| k.bounds()).reduce(|a, b| a.union(b)).unwrap_or(fb);
         let shift = if cb.intersect(fb).area() > 0.0 { designcraft_geom::Vec2::ZERO } else { fb.center().to_vec2() - cb.center().to_vec2() };
         let inv = world.inverse();
+        // A graphic copied on its own (Direct Selection) pasted into an empty or graphic frame
+        // becomes the frame's graphic, as placing it would: the frame then resizes without
+        // scaling it and has the fitting commands. The frame keeps its fitting options.
+        if let ([k], true, designcraft_doc::Content::Unassigned | designcraft_doc::Content::Graphic(_)) =
+            (kids.as_slice(), graphic_alone, &frame.content)
+            && let designcraft_doc::Content::Graphic(g) = &k.content
+        {
+            let mut g = designcraft_doc::Graphic { xf: inv * designcraft_geom::Affine::translate(shift) * k.xf * g.xf, ..g.clone() };
+            if let designcraft_doc::Content::Graphic(old) = &frame.content {
+                g.auto_fit = old.auto_fit;
+                g.fit_align = old.fit_align;
+                g.crop = old.crop;
+            }
+            let it = d.item_mut(target).ok_or(designcraft_doc::DocError::NoItem(target))?;
+            it.content = designcraft_doc::Content::Graphic(g);
+            *sel = Selection::items(vec![target]);
+            return Ok(json!({"id": target.0, "items": new.len()}));
+        }
         let kids: Vec<Arc<designcraft_doc::Item>> = kids
             .into_iter()
             .map(|mut k| {
@@ -771,13 +792,13 @@ mod paste_into_tests {
         assert!(matches!(&it.content, designcraft_doc::Content::Graphic(g) if g.crop == [0.0; 4]));
         assert_eq!(it.bounds(), designcraft_geom::Rect::new(50.0, 100.0, 250.0, 200.0));
         assert!(it.stroke.weight == 0.0 || it.stroke.swatch == "[None]", "{:?}", it.stroke);
-        // Paste Into a shape over it: the photo lands in place, inside the shape.
+        // Paste Into a shape over it: the photo lands in place, as the shape's graphic.
         let shape = s.execute("frame.create", &json!({"rect": [60, 90, 240, 210], "shape": "ellipse"})).unwrap()["id"].as_u64().unwrap();
         s.execute("selection.set", &json!({"ids": [shape]})).unwrap();
         s.execute("edit.pasteInto", &json!({})).unwrap();
         let d = s.doc().unwrap().doc.clone();
-        let kid = d.item(ItemId(shape)).unwrap().children()[0].clone();
-        let at = d.parent_xf(&d.find(kid.id).unwrap()) * kid.xf;
+        assert!(matches!(d.item(ItemId(shape)).unwrap().content, designcraft_doc::Content::Graphic(_)));
+        let at = content_world(&d, shape);
         assert!((at * designcraft_geom::Point::new(0.0, 0.0) - designcraft_geom::Point::new(50.0, 100.0)).hypot() < 1e-6);
         assert!((at * designcraft_geom::Point::new(200.0, 100.0) - designcraft_geom::Point::new(250.0, 200.0)).hypot() < 1e-6);
         // Delete with the photo selected: the frame stays, empty.
@@ -788,6 +809,91 @@ mod paste_into_tests {
         assert_eq!(s.doc().unwrap().selection, Selection::items(vec![ItemId(frame)]));
         d.check().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Where a frame's graphic or first pasted-into item sits on the spread.
+    fn content_world(d: &designcraft_doc::Document, id: u64) -> designcraft_geom::Affine {
+        let it = d.item(ItemId(id)).unwrap();
+        let at = d.parent_xf(&d.find(ItemId(id)).unwrap()) * it.xf;
+        match &it.content {
+            designcraft_doc::Content::Graphic(g) => at * g.xf,
+            _ => at * it.children()[0].xf,
+        }
+    }
+
+    fn near(a: designcraft_geom::Affine, b: designcraft_geom::Affine) -> bool {
+        a.as_coeffs().iter().zip(b.as_coeffs()).all(|(x, y)| (x - y).abs() < 1e-6)
+    }
+
+    /// #2894: a photo copied with Direct Selection and pasted into an empty frame is that frame's
+    /// photo, like the one it came from: resizing the frame crops it rather than scaling it, and
+    /// the fitting commands reach it.
+    #[test]
+    fn a_graphic_pasted_into_an_empty_frame_is_its_graphic() {
+        let dir = std::env::temp_dir().join(format!("dc-paste-into-graphic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let png = dir.join("photo.png");
+        std::fs::write(&png, designcraft_render::Rendered { width: 200, height: 100, pixels: vec![40u8; 200 * 100 * 4] }.to_png()).unwrap();
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        let first = s.execute("frame.create", &json!({"rect": [100, 100, 300, 200]})).unwrap()["id"].as_u64().unwrap();
+        s.execute("file.place", &json!({"path": png.to_string_lossy(), "frame": first})).unwrap();
+        let second = s.execute("frame.create", &json!({"rect": [100, 300, 300, 400]})).unwrap()["id"].as_u64().unwrap();
+        s.execute("selection.set", &json!({"ids": [first], "content": true})).unwrap();
+        s.execute("edit.copy", &json!({})).unwrap();
+        s.execute("selection.set", &json!({"ids": [second]})).unwrap();
+        s.execute("edit.pasteInto", &json!({})).unwrap();
+        let d = s.doc().unwrap().doc.clone();
+        assert!(
+            matches!(d.item(ItemId(second)).unwrap().content, designcraft_doc::Content::Graphic(_)),
+            "{:?}",
+            d.item(ItemId(second)).unwrap().content
+        );
+        d.check().unwrap();
+        // Selection tool resize: the frame changes, the photo stays where and as big as it was.
+        let before = content_world(&d, second);
+        s.execute("transform.resize", &json!({"ids": [second], "from": [100, 300, 300, 400], "to": [100, 300, 200, 400]})).unwrap();
+        let d = s.doc().unwrap().doc.clone();
+        assert_eq!(d.item(ItemId(second)).unwrap().bounds(), designcraft_geom::Rect::new(100.0, 300.0, 200.0, 400.0));
+        assert!(near(content_world(&d, second), before), "{:?} != {before:?}", content_world(&d, second));
+        // Fitting reaches the pasted photo: Fit Content to Frame squeezes it into the narrower frame.
+        s.execute("object.fit", &json!({"mode": "fitContentToFrame", "ids": [second]})).unwrap();
+        let d = s.doc().unwrap().doc.clone();
+        assert!(!near(content_world(&d, second), before));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #2894: a frame with an object pasted into it resizes on its own; the object keeps its size.
+    #[test]
+    fn resizing_a_frame_keeps_the_items_pasted_into_it() {
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        let a = s.execute("frame.create", &json!({"rect": [100, 100, 300, 300]})).unwrap()["id"].as_u64().unwrap();
+        s.execute("object.fill", &json!({"ids": [a], "swatch": "[Black]"})).unwrap();
+        let frame = s.execute("frame.create", &json!({"rect": [150, 150, 250, 250]})).unwrap()["id"].as_u64().unwrap();
+        s.execute("selection.set", &json!({"ids": [a]})).unwrap();
+        s.execute("edit.cut", &json!({})).unwrap();
+        s.execute("selection.set", &json!({"ids": [frame]})).unwrap();
+        s.execute("edit.pasteInto", &json!({})).unwrap();
+        let before = content_world(&s.doc().unwrap().doc, frame);
+        s.execute("transform.resize", &json!({"ids": [frame], "from": [150, 150, 250, 250], "to": [150, 150, 200, 250]})).unwrap();
+        let d = s.doc().unwrap().doc.clone();
+        let f = d.item(ItemId(frame)).unwrap();
+        assert!(f.has_nested_items());
+        assert_eq!(f.bounds(), designcraft_geom::Rect::new(150.0, 150.0, 200.0, 250.0));
+        assert!(near(content_world(&d, frame), before), "{:?} != {before:?}", content_world(&d, frame));
+        // The Control panel's width does the same.
+        s.execute("transform.set", &json!({"ids": [frame], "width": 80.0, "ref": 0})).unwrap();
+        let d = s.doc().unwrap().doc.clone();
+        assert_eq!(d.item(ItemId(frame)).unwrap().bounds(), designcraft_geom::Rect::new(150.0, 150.0, 230.0, 250.0));
+        assert!(near(content_world(&d, frame), before), "{:?} != {before:?}", content_world(&d, frame));
+        // A move there carries the pasted items along.
+        let x = d.item(ItemId(frame)).unwrap().bounds().x0;
+        s.execute("transform.set", &json!({"ids": [frame], "x": x + 10.0, "ref": 0})).unwrap();
+        let d = s.doc().unwrap().doc.clone();
+        let moved = designcraft_geom::Affine::translate((d.item(ItemId(frame)).unwrap().bounds().x0 - x, 0.0)) * before;
+        assert!(near(content_world(&d, frame), moved), "{:?} != {moved:?}", content_world(&d, frame));
+        d.check().unwrap();
     }
 }
 

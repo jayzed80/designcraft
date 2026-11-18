@@ -1451,7 +1451,9 @@ fn transform_resize(s: &mut Session, p: &Value) -> Result<Value> {
                 scale_object(d, *id, m, (sx * sy).abs().sqrt(), strokes);
             } else if it.flex.is_some() {
                 resize_container(it, m);
-            } else if matches!(it.content, Content::Group { .. }) {
+            } else if matches!(it.content, Content::Group { .. }) && !it.has_nested_items() {
+                // A group scales its objects; a frame with items pasted into it is resized below
+                // and they keep their size, as a placed graphic does.
                 it.xf = m * it.xf;
             } else {
                 // Resize the frame's path (in inner space); content keeps its size (InDesign's
@@ -1854,17 +1856,25 @@ fn transform_set(s: &mut Session, p: &Value) -> Result<Value> {
             if let Some(it) = d.item_mut(*id) {
                 if it.flex.is_some() {
                     resize_container(it, m);
-                } else if matches!(it.content, Content::Group { .. }) {
+                } else if matches!(it.content, Content::Group { .. }) && !it.has_nested_items() {
                     it.xf = m * it.xf;
                 } else {
                     let inner = it.xf.inverse() * m * it.xf;
                     bake(it, inner);
-                    // A pure move carries the placed graphic along; a resize leaves it at its size.
+                    // A pure move carries the placed graphic (or the items pasted into the frame)
+                    // along; a resize leaves it at its size.
                     let c = inner.as_coeffs();
-                    if let Content::Graphic(g) = &mut it.content
-                        && [c[0] - 1.0, c[1], c[2], c[3] - 1.0].iter().all(|v| v.abs() < 1e-9)
-                    {
-                        g.xf = inner * g.xf;
+                    if [c[0] - 1.0, c[1], c[2], c[3] - 1.0].iter().all(|v| v.abs() < 1e-9) {
+                        match &mut it.content {
+                            Content::Graphic(g) => g.xf = inner * g.xf,
+                            Content::Group { items } => {
+                                for k in items.iter_mut() {
+                                    let k = Arc::make_mut(k);
+                                    k.xf = inner * k.xf;
+                                }
+                            }
+                            _ => {}
+                        }
                     }
                 }
             }

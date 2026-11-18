@@ -416,6 +416,9 @@ pub struct Session {
     /// The x the clipboard's objects are measured from on their spread: its spine, or the left edge of
     /// single-sided pages. Paste keeps their distance from it.
     pub clipboard_origin: f64,
+    /// The clipboard was copied with the frames' content selected (Direct Selection): a placed
+    /// graphic on it is the graphic alone, which Paste Into makes the frame's graphic.
+    pub(crate) clipboard_content: bool,
     /// Crash-recovery folder (the app sets it; saving or closing a document removes its entry).
     pub recovery_dir: Option<std::path::PathBuf>,
     /// This session's number for the background recovery writer, which returns each result to
@@ -489,6 +492,7 @@ impl Session {
             find_context: None,
             clipboard: None,
             clipboard_origin: 0.0,
+            clipboard_content: false,
             recovery_dir: None,
             recovery_owner: recovery::Owner::new(),
             text_clipboard: None,
