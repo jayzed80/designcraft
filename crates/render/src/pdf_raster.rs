@@ -120,28 +120,6 @@ pub fn render_pdf_page(bytes: &[u8], page: usize, max_side: u32) -> Option<Pixma
     Some(raster_pixmap(&raster))
 }
 
-/// Rasterize PDF page `page` at exactly `w` × `h` pixels (the page stretched to fit them), for
-/// drawing it at that size. Strokes are at least a pixel wide at that size, as PDF viewers draw
-/// them; halving a larger raster would thin a hairline below a pixel and fade it (#2828).
-pub(crate) fn render_pdf_page_sized(bytes: &[u8], page: usize, (w, h): (u32, u32)) -> Option<Pixmap> {
-    #[cfg(test)]
-    PDF_RENDERS.with(|n| n.set(n.get() + 1));
-    if w == 0 || h == 0 || w > u32::from(u16::MAX) || h > u32::from(u16::MAX) {
-        return None;
-    }
-    let pdf = craft_pdf::open_slice(bytes, None).ok()?;
-    let p = pdf.pages().get(page)?;
-    let (pw, ph) = p.render_dimensions();
-    if !(pw > 0.0 && ph > 0.0) {
-        return None;
-    }
-    let scale = [(w as f32 / pw).min(8.0), (h as f32 / ph).min(8.0)];
-    let options = craft_pdf::raster::Options { scale, size: Some([w, h]), ..Default::default() };
-    let raster =
-        craft_pdf::raster::render(p, &craft_pdf::raster::RenderCache::new(), &craft_pdf::interpret::InterpreterSettings::default(), &options).ok()?;
-    (raster.width == w && raster.height == h).then(|| raster_pixmap(&raster))
-}
-
 fn raster_pixmap(raster: &craft_pdf::raster::Raster) -> Pixmap {
     let data = raster.bytes().as_chunks::<4>().0.iter().map(|c| vello_cpu::color::PremulRgba8 { r: c[0], g: c[1], b: c[2], a: c[3] }).collect();
     Pixmap::from_parts(data, raster.width as u16, raster.height as u16)

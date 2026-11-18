@@ -23,8 +23,7 @@ use designcraft_doc::{AssetData, SourceKey, Unavailable};
 use vello_cpu::Pixmap;
 
 use crate::decode::{decode_pixmap_reduced, decode_sizes, drawn_pixels};
-use crate::pdf_raster::render_pdf_page_sized;
-use crate::{decode_pixmap_page, halve, is_pdf};
+use crate::{decode_pixmap_page, halve};
 
 /// Decoded pixels kept (bytes).
 const BUDGET: usize = 768 << 20;
@@ -72,9 +71,6 @@ struct Cache {
     kept_full: std::collections::VecDeque<(SourceKey, u32)>,
     /// Linked bytes that couldn't be loaded: why, the link generation then, and a stamp.
     unavailable: HashMap<SourceKey, (Unavailable, u64, u64)>,
-    /// PDF pages decoded: each of their levels is drawn at its own size, never halved from a
-    /// finer one ([`vector_level`]). At most [`MAX_DIMS`].
-    vector: HashSet<(SourceKey, u32)>,
 }
 
 impl Cache {
@@ -238,21 +234,6 @@ fn set_dims(id: SourceKey, page: u32, size: (u32, u32), exact: bool) {
     });
 }
 
-/// Remember that page `page` of the bytes `id` names is a PDF page ([`Cache::vector`]).
-fn mark_vector(id: SourceKey, page: u32) {
-    with(|c| {
-        if c.vector.len() >= MAX_DIMS {
-            c.vector.clear();
-        }
-        c.vector.insert((id, page));
-    });
-}
-
-/// Whether page `page` of the bytes `id` names is a PDF page decoded before ([`Cache::vector`]).
-fn is_vector(id: SourceKey, page: u32) -> bool {
-    with(|c| c.vector.contains(&(id, page)))
-}
-
 /// The remembered full-resolution pixel size of the bytes `id` names.
 fn known_dims(id: SourceKey, page: u32) -> Option<(u32, u32)> {
     with(|c| c.dims.get(&(id, page)).copied())
@@ -292,9 +273,6 @@ fn decode_full(id: SourceKey, bytes: &[u8], page: u32) -> Option<Arc<Pixmap>> {
     // Decode outside the lock: other threads keep drawing cached images meanwhile.
     let pm = decode_pixmap_page(bytes, page);
     log_decode(id);
-    if is_pdf(bytes) {
-        mark_vector(id, page);
-    }
     match pm {
         Some(pm) => {
             set_dims(id, page, (u32::from(pm.width()), u32::from(pm.height())), true);
@@ -381,9 +359,6 @@ fn cached_level(id: SourceKey, page: u32, level: u8, colour: u64) -> Option<Arc<
     if let Some(pm) = lookup((id, page, level)) {
         return Some(pm);
     }
-    if is_vector(id, page) {
-        return None;
-    }
     let (from, finer) = (0..level).rev().find_map(|l| lookup((id, page, l)).map(|pm| (l, pm)))?;
     let pm = halve_to(finer, from, level);
     store(id, page, level, pm.clone(), colour);
@@ -430,9 +405,6 @@ fn mip_gated(data: &AssetData, page: u32, width_pt: f64, on_screen: f64, gate: b
             return Some(pm);
         }
         let level = level_for(size, width_pt, on_screen);
-        if let Some(pm) = vector_level(id, &bytes, page, size, level, gate.then_some(held), colour) {
-            return Some(pm);
-        }
         if let Some(pm) = reduced(id, &bytes, page, level, gate.then_some(held), colour) {
             return Some(pm);
         }
@@ -1027,11 +999,9 @@ pub(crate) fn warm(wants: Vec<Want>) -> usize {
 /// Each asset's full pixel size and the levels it is drawn at.
 type DrawnLevels = HashMap<(SourceKey, u32), ((u32, u32), Vec<u8>)>;
 
-/// Whether every drawing of `k` in `levels` finds its level cached, or a finer one to halve (not
-/// for a PDF page: [`Cache::vector`]).
+/// Whether every drawing of `k` in `levels` finds its level cached, or a finer one to halve.
 fn drawn_cached(c: &Cache, k: &(SourceKey, u32), levels: &DrawnLevels) -> bool {
-    let vector = c.vector.contains(k);
-    levels.get(k).is_some_and(|(_, ls)| ls.iter().all(|l| (if vector { *l..=*l } else { 0..=*l }).any(|f| c.map.contains_key(&(k.0, k.1, f)))))
+    levels.get(k).is_some_and(|(_, ls)| ls.iter().all(|l| (0..=*l).any(|f| c.map.contains_key(&(k.0, k.1, f)))))
 }
 
 /// Whether `k` failed to decode, or its linked bytes couldn't be had under the links of
@@ -1219,24 +1189,6 @@ static WAITED: (Mutex<Vec<SourceKey>>, Condvar) = (Mutex::new(Vec::new()), Condv
 fn waited(id: SourceKey) {
     WAITED.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(id);
     WAITED.1.notify_all();
-}
-
-/// Level `level` (above 0) of a PDF page whose full decode is `size` pixels, drawn at the level's
-/// size instead of halved from the full decode: halving thins a stroke a pixel wide to a faint
-/// grey one, where a PDF viewer draws every stroke at least a pixel wide at the size shown
-/// (#2828). `None` for other formats, level 0, or when the page can't be drawn. `gate` as
-/// [`reduced`]'s.
-fn vector_level(id: SourceKey, bytes: &[u8], page: u32, size: (u32, u32), level: u8, gate: Option<usize>, colour: u64) -> Option<Arc<Pixmap>> {
-    if level == 0 || !is_pdf(bytes) {
-        return None;
-    }
-    let (w, h) = halved(size, level);
-    let _reserved = gate.map(|held| reserve((w as usize).saturating_mul(h as usize).saturating_mul(12).saturating_add(held), id, None));
-    let pm = Arc::new(render_pdf_page_sized(bytes, page as usize, (w, h))?);
-    log_decode(id);
-    mark_vector(id, page);
-    store(id, page, level, pm.clone(), colour);
-    Some(pm)
 }
 
 /// Level `level` of a JPEG for [`mip`], decoded at 1/2, 1/4 or 1/8 of its size straight from
@@ -1566,39 +1518,6 @@ pub(crate) mod tests {
         assert_eq!(peak, 128 * 96 * 8, "only the selected eighth-size mip is decoded");
         let full = decode_sizes(&bytes.load().unwrap(), 0);
         assert!(cached < full.0 && peak < full.1, "reduced estimates {cached}/{peak}, full {full:?}");
-    }
-
-    /// The most opaque pixel of the middle row of `pm` with an x in `xs`.
-    fn densest_in_middle_row(pm: &Pixmap, xs: std::ops::Range<usize>) -> u8 {
-        let (w, y) = (usize::from(pm.width()), usize::from(pm.height()) / 2);
-        pm.data()[y * w..(y + 1) * w][xs].iter().map(|p| p.a).max().unwrap()
-    }
-
-    /// A placed CAD drawing (#2828): its hairlines and thin strokes draw at least a device pixel
-    /// wide and solid at the size the page is drawn at, as PDF viewers draw them, not a solid
-    /// pixel at the full decode halved down to a faint grey one.
-    #[test]
-    fn thin_pdf_strokes_stay_solid_at_coarser_levels() {
-        // A black hairline (`0 w`) and a 0.1 pt line, both vertical, top to bottom.
-        let pdf = crate::tests::one_page_pdf("0 0 0 RG 0 w 200.3 0 m 200.3 792 l S 0.1 w 400.3 0 m 400.3 792 l S");
-        let bytes = AssetData::embedded(pdf.clone());
-        let full = decode_pixmap_page(&pdf, 0).unwrap();
-        // Drawn 612 pt wide at half a pixel a point: two levels below the full decode.
-        let pm = mip(&bytes, 0, 612.0, 0.5).unwrap();
-        let want = halved((u32::from(full.width()), u32::from(full.height())), 2);
-        assert_eq!((u32::from(pm.width()), u32::from(pm.height())), want);
-        let (half, w) = (usize::from(pm.width()) / 2, usize::from(pm.width()));
-        let (hairline, thin) = (densest_in_middle_row(&pm, 0..half), densest_in_middle_row(&pm, half..w));
-        assert!(hairline >= 200, "hairline alpha {hairline}");
-        assert!(thin >= 200, "0.1 pt line alpha {thin}");
-
-        // Zoomed in (the full decode cached) and out again: the coarse level is drawn again,
-        // not halved from the finer one.
-        let other = AssetData::embedded(crate::tests::one_page_pdf("0 0 0 RG 0 w 200.3 0 m 200.3 792 l S"));
-        assert!(mip(&other, 0, 612.0, 4.0).is_some());
-        let pm = mip(&other, 0, 612.0, 0.5).unwrap();
-        let hairline = densest_in_middle_row(&pm, 0..usize::from(pm.width()));
-        assert!(hairline >= 200, "after a zoom-in, hairline alpha {hairline}");
     }
 
     #[test]
