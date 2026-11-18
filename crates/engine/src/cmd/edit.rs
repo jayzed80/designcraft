@@ -540,10 +540,8 @@ pub fn specs() -> Vec<CommandSpec> {
 fn copy_items(s: &mut Session) -> Result<()> {
     let clip = clip_doc(s)?;
     let st = s.doc()?;
-    let content = st.selection.content;
     let spread = st.selection.items.iter().find_map(|id| st.doc.find(*id)).and_then(|loc| st.doc.spread(loc.spread));
     s.clipboard_origin = spread.map_or(0.0, paste_origin);
-    s.clipboard_content = content;
     s.clipboard = Some(Arc::new(clip));
     Ok(())
 }
@@ -691,7 +689,6 @@ fn paste_into(s: &mut Session, p: &Value) -> Result<Value> {
     if ids.is_empty() {
         return Err(super::bad("edit.pasteInto", "the clipboard holds no objects"));
     }
-    let graphic_alone = s.clipboard_content;
     s.edit(|d, sel| {
         let loc = d.find(target).ok_or(designcraft_doc::DocError::NoItem(target))?;
         let frame = d.item_at(&loc).ok_or(designcraft_doc::DocError::NoItem(target))?.clone();
@@ -710,24 +707,6 @@ fn paste_into(s: &mut Session, p: &Value) -> Result<Value> {
         let cb = kids.iter().map(|k| k.bounds()).reduce(|a, b| a.union(b)).unwrap_or(fb);
         let shift = if cb.intersect(fb).area() > 0.0 { designcraft_geom::Vec2::ZERO } else { fb.center().to_vec2() - cb.center().to_vec2() };
         let inv = world.inverse();
-        // A graphic copied on its own (Direct Selection) pasted into an empty or graphic frame
-        // becomes the frame's graphic, as placing it would: the frame then resizes without
-        // scaling it and has the fitting commands. The frame keeps its fitting options.
-        if let ([k], true, designcraft_doc::Content::Unassigned | designcraft_doc::Content::Graphic(_)) =
-            (kids.as_slice(), graphic_alone, &frame.content)
-            && let designcraft_doc::Content::Graphic(g) = &k.content
-        {
-            let mut g = designcraft_doc::Graphic { xf: inv * designcraft_geom::Affine::translate(shift) * k.xf * g.xf, ..g.clone() };
-            if let designcraft_doc::Content::Graphic(old) = &frame.content {
-                g.auto_fit = old.auto_fit;
-                g.fit_align = old.fit_align;
-                g.crop = old.crop;
-            }
-            let it = d.item_mut(target).ok_or(designcraft_doc::DocError::NoItem(target))?;
-            it.content = designcraft_doc::Content::Graphic(g);
-            *sel = Selection::items(vec![target]);
-            return Ok(json!({"id": target.0, "items": new.len()}));
-        }
         let kids: Vec<Arc<designcraft_doc::Item>> = kids
             .into_iter()
             .map(|mut k| {
